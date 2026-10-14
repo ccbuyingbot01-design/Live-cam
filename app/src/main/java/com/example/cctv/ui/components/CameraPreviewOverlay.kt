@@ -70,14 +70,14 @@ fun CameraPreviewOverlay(
     val recordingDuration by viewModel.recordingDurationSeconds.collectAsState()
     val pendingAutoRecord by viewModel.pendingAutoRecord.collectAsState()
 
-    // Auto-start recording when camera first opens in Camera Sender mode
-    LaunchedEffect(Unit) {
-        viewModel.autoStartRecording(context)
-    }
+    // NOTE: Removed auto-start recording on camera open — it crashed because
+    // camera was not yet bound. Recording now only starts via user tap or remote command.
 
     // React to remote viewer commanding a start-recording
     LaunchedEffect(pendingAutoRecord) {
         if (pendingAutoRecord) {
+            // Wait for camera to be fully bound before starting recording
+            kotlinx.coroutines.delay(2000L)
             viewModel.autoStartRecording(context)
         }
     }

@@ -1,7 +1,8 @@
 package com.example.cctv.ui.screens
 
+import android.graphics.BitmapFactory
+import android.util.Base64
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,8 +30,11 @@ import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -49,9 +53,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -86,6 +90,11 @@ fun ViewerModeScreen(
     val activeCamera = pairedDevices.find { it.id == selectedCameraId } ?: pairedDevices.firstOrNull()
     var pairingCodeInput by remember { mutableStateOf("") }
     var showPairInput by remember { mutableStateOf(false) }
+    var showQrScanner by remember { mutableStateOf(false) }
+
+    // Cloud stream data
+    val remoteFrame by viewModel.remoteFrameBase64.collectAsState()
+    val remoteStreamLive by viewModel.remoteStreamLive.collectAsState()
 
     val scrollState = rememberScrollState()
     val timeFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
@@ -122,6 +131,18 @@ fun ViewerModeScreen(
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = "Pair Camera",
+                        tint = NeonCyanPrimary
+                    )
+                }
+
+                // QR Scanner button
+                IconButton(
+                    onClick = { showQrScanner = true },
+                    modifier = Modifier.testTag("viewer_scan_qr_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QrCodeScanner,
+                        contentDescription = "Scan QR",
                         tint = NeonCyanPrimary
                     )
                 }
@@ -242,34 +263,71 @@ fun ViewerModeScreen(
                     .testTag("viewer_feed_player")
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // Simulated Stream Canvas
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        drawRect(color = Color(0xFF080D1A))
-
-                        if (activeCamera.nightVision) {
-                            drawRect(color = NightVisionGreen.copy(alpha = 0.15f))
+                    // Live Frame Display from Cloud
+                    if (remoteStreamLive && remoteFrame != null) {
+                        val bitmap = remember(remoteFrame) {
+                            try {
+                                val bytes = Base64.decode(remoteFrame, Base64.DEFAULT)
+                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            } catch (e: Exception) { null }
                         }
-
-                        // Video Scanlines simulation
-                        var y = 0f
-                        while (y < size.height) {
-                            drawLine(
-                                color = Color.White.copy(alpha = 0.03f),
-                                start = Offset(0f, y),
-                                end = Offset(size.width, y),
-                                strokeWidth = 1f
+                        if (bitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "Live Camera Feed",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
                             )
-                            y += 8f
+                        } else {
+                            // Frame decode error
+                            Box(
+                                modifier = Modifier.fillMaxSize().background(Color(0xFF080D1A)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Decoding frame...", color = TextSecondary, fontSize = 12.sp)
+                            }
                         }
 
-                        // Central Surveillance Crosshair
-                        val midX = size.width / 2
-                        val midY = size.height / 2
-                        val color = if (activeCamera.nightVision) NightVisionGreen.copy(alpha = 0.5f) else NeonCyanPrimary.copy(alpha = 0.5f)
-
-                        drawLine(color, Offset(midX - 24f, midY), Offset(midX + 24f, midY), strokeWidth = 2f)
-                        drawLine(color, Offset(midX, midY - 24f), Offset(midX, midY + 24f), strokeWidth = 2f)
-                        drawCircle(color, radius = 40f, center = Offset(midX, midY), style = Stroke(width = 1.5f))
+                        // Night vision overlay
+                        if (activeCamera.nightVision) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(NightVisionGreen.copy(alpha = 0.15f))
+                            )
+                        }
+                    } else {
+                        // No stream yet — show waiting placeholder
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xFF080D1A)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.VideocamOff,
+                                    contentDescription = "Offline",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Text(
+                                    text = if (activeCamera.isOnline) "Waiting for camera stream..." else "Camera Offline",
+                                    color = TextSecondary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "Make sure the camera phone is running in Live Cam mode",
+                                    color = TextSecondary.copy(alpha = 0.6f),
+                                    fontSize = 11.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
                     }
 
                     // Feed HUD Header
@@ -291,7 +349,7 @@ fun ViewerModeScreen(
                                     modifier = Modifier
                                         .size(8.dp)
                                         .clip(CircleShape)
-                                        .background(SecurityGreen)
+                                        .background(if (remoteStreamLive) SecurityGreen else Color.Gray)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
@@ -335,12 +393,21 @@ fun ViewerModeScreen(
                                 .background(Color.Black.copy(alpha = 0.7f))
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
-                            Text(
-                                text = "SIGNAL: EXCELLENT (30 FPS)",
-                                color = Color.White,
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.SignalCellularAlt,
+                                    contentDescription = "Signal",
+                                    tint = if (remoteStreamLive) SecurityGreen else Color.Gray,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (remoteStreamLive) "CLOUD STREAM ACTIVE" else "NO SIGNAL",
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.weight(1f))
@@ -422,6 +489,19 @@ fun ViewerModeScreen(
                     }
                 }
             }
+        }
+
+        // QR Scanner overlay (accessible from viewer too)
+        if (showQrScanner) {
+            QrScannerScreen(
+                onCodeScanned = { code ->
+                    viewModel.pairNewDevice(code)
+                    showQrScanner = false
+                },
+                onDismiss = {
+                    showQrScanner = false
+                }
+            )
         }
     }
 }

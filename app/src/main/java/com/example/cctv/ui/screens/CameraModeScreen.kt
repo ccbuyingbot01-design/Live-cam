@@ -95,7 +95,9 @@ fun CameraModeScreen(
     val isSirenActive by viewModel.isSirenRinging.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
     val recordingMessage by viewModel.recordingMessage.collectAsState()
+    val supabaseUser by viewModel.supabaseUser.collectAsState()
     var showQrDialog by remember { mutableStateOf(false) }
+    var showQrScanner by remember { mutableStateOf(false) }
     var isServiceRunning by remember { mutableStateOf(CctvForegroundService.isServiceRunning) }
 
     // ── Storage permission launcher ────────────────────────────────────
@@ -370,7 +372,28 @@ fun CameraModeScreen(
         if (showQrDialog) {
             PairingQrDialog(
                 device = currentDevice,
-                onDismiss = { showQrDialog = false }
+                username = supabaseUser?.username ?: "",
+                onDismiss = { showQrDialog = false },
+                onScanQr = {
+                    showQrDialog = false
+                    showQrScanner = true
+                },
+                onPairCode = { code ->
+                    viewModel.pairNewDevice(code)
+                }
+            )
+        }
+
+        // QR Scanner Full-Screen Overlay
+        if (showQrScanner) {
+            QrScannerScreen(
+                onCodeScanned = { code ->
+                    viewModel.pairNewDevice(code)
+                    showQrScanner = false
+                },
+                onDismiss = {
+                    showQrScanner = false
+                }
             )
         }
     }

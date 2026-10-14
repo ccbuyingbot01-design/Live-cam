@@ -7,11 +7,13 @@ import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.BatteryManager
+import android.util.Log
 import androidx.camera.view.PreviewView
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewModelScope
 import com.example.cctv.camera.CameraXManager
+import com.example.cctv.camera.FrameCaptureAnalyzer
 import com.example.cctv.camera.MotionDetector
 import com.example.cctv.camera.SirenPlayer
 import com.example.cctv.camera.VideoRecordingManager
@@ -42,6 +44,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     val pairedDevices = repository.pairedDevices
     val selectedCameraId = repository.selectedCameraId
     val motionEvents = repository.motionEvents
+    val isCloudConnected = repository.isCloudConnected
 
     private val _supabaseUser = MutableStateFlow<SupabaseUser?>(null)
     val supabaseUser: StateFlow<SupabaseUser?> = _supabaseUser.asStateFlow()
@@ -69,6 +72,17 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingAutoRecord = MutableStateFlow(false)
     val pendingAutoRecord: StateFlow<Boolean> = _pendingAutoRecord.asStateFlow()
 
+    // ── Remote Stream Frame for Viewer ─────────────────────────────────────
+    private val _remoteFrameBase64 = MutableStateFlow<String?>(null)
+    val remoteFrameBase64: StateFlow<String?> = _remoteFrameBase64.asStateFlow()
+
+    private val _remoteStreamLive = MutableStateFlow(false)
+    val remoteStreamLive: StateFlow<Boolean> = _remoteStreamLive.asStateFlow()
+
+    // Latest captured frame for cloud streaming (camera side)
+    private val _latestFrameBase64 = MutableStateFlow<String?>(null)
+    val latestFrameBase64: StateFlow<String?> = _latestFrameBase64.asStateFlow()
+
     private var recordingTimerJob: Job? = null
 
     private val motionDetector = MotionDetector(
@@ -85,24 +99,22 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── Auto-start support ────────────────────────────────────────────────────
 
-    /**
-     * Called by CameraPreviewOverlay once the camera is bound.
-     * Automatically starts video recording if we're in Camera Sender mode
-     * and not already recording.
-     */
     fun autoStartRecording(context: Context) {
-        if (deviceMode.value == DeviceMode.CAMERA_SENDER && !_isRecording.value) {
+        if (deviceMode.value == DeviceMode.CAMERA_SENDER
+            && !_isRecording.value
+            && videoRecordingManager.isReady()
+        ) {
             startVideoRecording(context)
         }
     }
 
     fun setSupabaseUser(user: SupabaseUser) {
         _supabaseUser.value = user
+        repository.setUsername(user.username)
     }
 
     fun setDeviceMode(mode: DeviceMode) {
         repository.setDeviceMode(mode)
-        // Stop recording if switching away from Camera mode
         if (mode != DeviceMode.CAMERA_SENDER && _isRecording.value) {
             stopVideoRecording()
         }
@@ -125,10 +137,6 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    /**
-     * Binds camera with VideoCapture recorder support.
-     * Use this in CameraModeScreen when video recording is needed.
-     */
     fun bindCameraWithRecorder(
         context: Context,
         lifecycleOwner: LifecycleOwner,
@@ -139,8 +147,28 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
             context = context,
             lifecycleOwner = lifecycleOwner,
             previewView = previewView,
-            useFrontLens = dev.lensFacingFront
+            useFrontLens = dev.lensFacingFront,
+            frameAnalyzer = createFrameAnalyzer()
         )
+    }
+
+    /**
+     * Creates a FrameCaptureAnalyzer that captures JPEG frames
+     * and stores them for cloud publishing.
+     */
+    private fun createFrameAnalyzer(): FrameCaptureAnalyzer {
+        return FrameCaptureAnalyzer(
+            onFrameCaptured = { base64 ->
+                _latestFrameBase64.value = base64
+            },
+            intervalMs = 1500L,
+            jpegQuality = 35
+        )
+    }
+
+    /** Called to update the frame for cloud streaming. */
+    fun updateLatestFrame(base64: String) {
+        _latestFrameBase64.value = base64
     }
 
     // ── Video Recording Control ───────────────────────────────────────────────
@@ -153,6 +181,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                 _isRecording.value = true
                 _recordingMessage.value = null
                 startRecordingTimer()
+                repository.setRecordingState(true)
             },
             onRecordingFinished = { uri ->
                 _isRecording.value = false
@@ -163,11 +192,13 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     "Recording failed."
                 }
+                repository.setRecordingState(false)
             },
             onError = { err ->
                 _isRecording.value = false
                 stopRecordingTimer()
                 _recordingMessage.value = "Error: $err"
+                repository.setRecordingState(false)
             }
         )
     }
@@ -198,11 +229,12 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         _recordingDurationSeconds.value = 0L
     }
 
+    // ── Camera Controls ───────────────────────────────────────────────────────
+
     fun toggleTorch() {
         val newState = !currentDevice.value.torchOn
         cameraManager.toggleTorch(newState)
         repository.updateTorch(newState)
-        syncControlToSupabase()
     }
 
     fun switchCameraLens(
@@ -218,7 +250,6 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
             previewView = previewView,
             motionAnalyzer = if (currentDevice.value.motionGuardEnabled) motionDetector else null
         )
-        syncControlToSupabase()
     }
 
     fun toggleMotionGuard(enabled: Boolean) {
@@ -238,7 +269,6 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleNightVision() {
         val newState = !currentDevice.value.nightVision
         repository.toggleNightVision(newState)
-        syncControlToSupabase()
     }
 
     fun toggleSirenAlarm() {
@@ -251,12 +281,13 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
             _isSirenRinging.value = true
             repository.setSirenState(true)
         }
-        syncControlToSupabase()
     }
 
     fun dismissRecentMotionAlert() {
         _recentMotionAlert.value = null
     }
+
+    // ── Foreground Service ────────────────────────────────────────────────────
 
     fun startForegroundCctvService(context: Context) {
         val serviceIntent = Intent(context, CctvForegroundService::class.java).apply {
@@ -276,6 +307,8 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         context.startService(serviceIntent)
     }
 
+    // ── Pairing ───────────────────────────────────────────────────────────────
+
     fun pairNewDevice(code: String): Boolean {
         return repository.pairNewDeviceByCode(code)
     }
@@ -284,68 +317,29 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         repository.selectCameraDevice(id)
     }
 
+    // ── Remote Control from Viewer ────────────────────────────────────────────
+
     fun remoteToggleTorch(deviceId: String) {
         repository.remoteToggleTorch(deviceId)
-        val user = _supabaseUser.value ?: return
-        viewModelScope.launch {
-            val dev = pairedDevices.value.find { it.id == deviceId }
-            supabaseService.updateRemoteControl(user.username, torchOn = dev?.torchOn)
-        }
     }
 
     fun remoteToggleSiren(deviceId: String) {
         repository.remoteToggleSiren(deviceId)
-        val user = _supabaseUser.value ?: return
-        viewModelScope.launch {
-            val dev = pairedDevices.value.find { it.id == deviceId }
-            supabaseService.updateRemoteControl(user.username, sirenActive = dev?.sirenActive)
-        }
     }
 
     fun remoteToggleLens(deviceId: String) {
         repository.remoteToggleLens(deviceId)
-        val user = _supabaseUser.value ?: return
-        viewModelScope.launch {
-            val dev = pairedDevices.value.find { it.id == deviceId }
-            supabaseService.updateRemoteControl(user.username, lensFacingFront = dev?.lensFacingFront)
-        }
     }
 
     fun remoteToggleNightVision(deviceId: String) {
         repository.remoteToggleNightVision(deviceId)
-        val user = _supabaseUser.value ?: return
-        viewModelScope.launch {
-            val dev = pairedDevices.value.find { it.id == deviceId }
-            supabaseService.updateRemoteControl(user.username, nightVision = dev?.nightVision)
-        }
     }
 
     fun remoteToggleRecording(deviceId: String) {
         repository.remoteToggleRecording(deviceId)
-        val user = _supabaseUser.value ?: return
-        viewModelScope.launch {
-            val dev = pairedDevices.value.find { it.id == deviceId }
-            supabaseService.updateRemoteControl(
-                username = user.username,
-                recordingActive = dev?.isRecording
-            )
-        }
     }
 
-    private fun syncControlToSupabase() {
-        val user = _supabaseUser.value ?: return
-        val dev = currentDevice.value
-        viewModelScope.launch {
-            supabaseService.updateRemoteControl(
-                username = user.username,
-                torchOn = dev.torchOn,
-                sirenActive = dev.sirenActive,
-                lensFacingFront = dev.lensFacingFront,
-                nightVision = dev.nightVision,
-                recordingActive = dev.isRecording
-            )
-        }
-    }
+    // ── Cloud Sync Loop ───────────────────────────────────────────────────────
 
     private fun startSupabaseRealtimeLoop() {
         viewModelScope.launch {
@@ -354,9 +348,9 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                     val user = _supabaseUser.value
                     if (user != null) {
                         if (deviceMode.value == DeviceMode.CAMERA_SENDER) {
+                            // Camera mode: publish stream + poll for commands
                             val dev = currentDevice.value
-                            // Publish camera state (including recording flag) to Supabase
-                            supabaseService.publishStream(
+                            val publishOk = repository.supabaseService.publishStream(
                                 username = user.username,
                                 isLive = true,
                                 torchOn = dev.torchOn,
@@ -364,55 +358,121 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                                 sirenActive = dev.sirenActive,
                                 nightVision = dev.nightVision,
                                 batteryLevel = dev.batteryLevel,
-                                frameBase64 = null,
+                                frameBase64 = _latestFrameBase64.value,
                                 recordingActive = _isRecording.value
                             )
+                            repository.setCloudConnected(publishOk)
 
-                            // Poll for remote recording command from Viewer
-                            val stream = supabaseService.fetchStream(user.username)
+                            // Poll for remote commands from viewer
+                            val commands = repository.supabaseService.fetchPendingCommands(dev.id)
+                            for (cmd in commands) {
+                                handleRemoteCommand(cmd.action)
+                                repository.supabaseService.markCommandConsumed(cmd.id)
+                            }
+
+                            // Also check if viewer set recording_active via stream
+                            val stream = repository.supabaseService.fetchStream(user.username)
                             if (stream != null) {
                                 val remoteWantsRecording = stream.recordingActive
                                 val currentlyRecording = _isRecording.value
                                 if (remoteWantsRecording && !currentlyRecording) {
-                                    // Viewer commanded START recording — but we need context.
-                                    // Mark flag in device; CameraPreviewOverlay will call autoStartRecording.
                                     repository.setRecordingState(true)
                                     _pendingAutoRecord.value = true
                                 } else if (!remoteWantsRecording && currentlyRecording) {
-                                    // Viewer commanded STOP recording
                                     stopVideoRecording()
                                     repository.setRecordingState(false)
                                 }
                             }
 
                         } else if (deviceMode.value == DeviceMode.VIEWER_MONITOR) {
-                            val stream = supabaseService.fetchStream(user.username)
+                            // Viewer mode: fetch stream from camera user
+                            val stream = repository.supabaseService.fetchStream(user.username)
                             if (stream != null) {
-                                // Sync remote camera state (including recording flag)
+                                repository.setCloudConnected(stream.isLive)
+                                _remoteStreamLive.value = stream.isLive
+                                _remoteFrameBase64.value = stream.frameBase64
+
+                                // Sync remote camera state to paired devices
                                 val updatedList = pairedDevices.value.map { d ->
-                                    if (d.name.contains(user.username, ignoreCase = true) || d.pairingCode.contains(user.username, ignoreCase = true)) {
-                                        d.copy(
-                                            isOnline = stream.isLive,
-                                            torchOn = stream.torchOn,
-                                            lensFacingFront = stream.lensFacingFront,
-                                            sirenActive = stream.sirenActive,
-                                            nightVision = stream.nightVision,
-                                            batteryLevel = stream.batteryLevel,
-                                            isRecording = stream.recordingActive
-                                        )
-                                    } else d
+                                    d.copy(
+                                        isOnline = stream.isLive,
+                                        isStreaming = stream.isLive,
+                                        torchOn = stream.torchOn,
+                                        lensFacingFront = stream.lensFacingFront,
+                                        sirenActive = stream.sirenActive,
+                                        nightVision = stream.nightVision,
+                                        batteryLevel = stream.batteryLevel,
+                                        isRecording = stream.recordingActive
+                                    )
                                 }
                                 repository.updatePairedDevices(updatedList)
+                            } else {
+                                repository.setCloudConnected(false)
+                                _remoteStreamLive.value = false
+                            }
+
+                            // Also fetch unread motion alerts
+                            val alerts = repository.supabaseService.fetchUnreadMotionAlerts(user.username)
+                            if (alerts.isNotEmpty()) {
+                                val latest = alerts.first()
+                                _recentMotionAlert.value = MotionEvent(
+                                    id = latest.id,
+                                    deviceId = latest.deviceId,
+                                    deviceName = latest.deviceName,
+                                    timestamp = latest.timestamp,
+                                    intensity = latest.intensity,
+                                    severity = try {
+                                        com.example.cctv.data.MotionSeverity.valueOf(latest.severity)
+                                    } catch (e: Exception) {
+                                        com.example.cctv.data.MotionSeverity.LOW
+                                    },
+                                    snapshotBase64 = latest.snapshotBase64,
+                                    description = latest.description
+                                )
                             }
                         }
                     }
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e("CctvViewModel", "Sync loop error", e)
                 }
-                delay(1200) // Poll/Sync interval
+                delay(1500) // Poll/Sync interval
             }
         }
     }
+
+    /**
+     * Handle incoming remote commands on the camera side.
+     */
+    private fun handleRemoteCommand(action: String) {
+        when (action) {
+            "toggle_torch" -> {
+                val newState = !currentDevice.value.torchOn
+                cameraManager.toggleTorch(newState)
+                repository.updateTorch(newState)
+            }
+            "toggle_siren" -> {
+                toggleSirenAlarm()
+            }
+            "toggle_lens" -> {
+                val newFront = !currentDevice.value.lensFacingFront
+                repository.updateLensFacing(newFront)
+            }
+            "toggle_night_vision" -> {
+                val newState = !currentDevice.value.nightVision
+                repository.toggleNightVision(newState)
+            }
+            "start_recording" -> {
+                repository.setRecordingState(true)
+                _pendingAutoRecord.value = true
+            }
+            "stop_recording" -> {
+                stopVideoRecording()
+                repository.setRecordingState(false)
+            }
+        }
+    }
+
+    // ── Motion Detection ──────────────────────────────────────────────────────
 
     private fun onLocalMotionDetected(intensity: Float, snapshot: Bitmap?) {
         viewModelScope.launch {
@@ -422,68 +482,41 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
             val user = _supabaseUser.value
             if (user != null && latest != null) {
-    // In motion detection flow, trigger flash when high intensity
-    if (intensity > 0.7f && !currentDevice.value.torchOn) {
-        // Activate torch for alert
-        triggerFlashOnMotion()
-        // Log alert with torchTriggered = true
-        supabaseService.logMotionAlert(
-            username = user.username,
-            deviceId = currentDevice.value.id,
-            deviceName = currentDevice.value.name,
-            severity = latest.severity.name,
-            intensity = intensity,
-            description = latest.description,
-            snapshotBase64 = latest.snapshotBase64,
-            torchTriggered = true
-        )
-    } else {
-        // Regular motion alert without flash
-        supabaseService.logMotionAlert(
-            username = user.username,
-            deviceId = currentDevice.value.id,
-            deviceName = currentDevice.value.name,
-            severity = latest.severity.name,
-            intensity = intensity,
-            description = latest.description,
-            snapshotBase64 = latest.snapshotBase64
-        )
-    }
-            }
+                if (intensity > 0.7f && !currentDevice.value.torchOn) {
+                    triggerFlashOnMotion()
+                }
 
-            if (intensity > 0.7f && currentDevice.value.sirenActive) {
-                sirenPlayer.startSiren(viewModelScope)
-                _isSirenRinging.value = true
+                if (intensity > 0.7f && currentDevice.value.sirenActive) {
+                    sirenPlayer.startSiren(viewModelScope)
+                    _isSirenRinging.value = true
+                }
             }
         }
     }
 
-    // ── Flash (Torch) on Motion Detection ───────────────────────────────────────
+    // ── Flash (Torch) on Motion Detection ───────────────────────────────────
     private var flashJob: Job? = null
 
-    /**
-     * Turns on the device torch for a short duration (default 5s) when motion is detected.
-     * This is independent of user‑controlled torch state.
-     */
     private fun triggerFlashOnMotion(durationMs: Long = 5_000L) {
-        // If torch is already on, just reset the timer
         if (currentDevice.value.torchOn) {
             flashJob?.cancel()
             flashJob = viewModelScope.launch {
                 delay(durationMs)
-                toggleTorch() // turn off
+                toggleTorch()
             }
             return
         }
-        // Turn on torch
         toggleTorch()
         flashJob?.cancel()
         flashJob = viewModelScope.launch {
             delay(durationMs)
-            toggleTorch() // turn off after delay
+            toggleTorch()
         }
     }
-            private fun monitorBatteryState() {
+
+    // ── Battery Monitoring ────────────────────────────────────────────────────
+
+    private fun monitorBatteryState() {
         try {
             val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
             val batteryStatus: Intent? = getApplication<Application>().registerReceiver(null, filter)
@@ -503,7 +536,6 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
             e.printStackTrace()
         }
     }
-
 
     override fun onCleared() {
         super.onCleared()

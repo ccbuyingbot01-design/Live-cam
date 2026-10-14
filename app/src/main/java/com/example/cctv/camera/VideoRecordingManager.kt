@@ -9,7 +9,9 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCase
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.MediaStoreOutputOptions
@@ -25,6 +27,7 @@ import androidx.lifecycle.LifecycleOwner
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
@@ -44,7 +47,8 @@ class VideoRecordingManager {
     private var videoCapture: VideoCapture<Recorder>? = null
     private var activeRecording: Recording? = null
     private var cameraProvider: ProcessCameraProvider? = null
-    private val recordingExecutor = Executors.newSingleThreadExecutor()
+    private val recordingExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val analysisExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     // ── State ────────────────────────────────────────────────────────────────
 
@@ -53,6 +57,9 @@ class VideoRecordingManager {
 
     var currentRecordingUri: android.net.Uri? = null
         private set
+
+    /** Returns true when camera + recorder are bound and ready to record. */
+    fun isReady(): Boolean = videoCapture != null && cameraProvider != null
 
     // ── Camera Binding ────────────────────────────────────────────────────────
 
@@ -65,6 +72,7 @@ class VideoRecordingManager {
         lifecycleOwner: LifecycleOwner,
         previewView: PreviewView,
         useFrontLens: Boolean = false,
+        frameAnalyzer: ImageAnalysis.Analyzer? = null,
         onReady: ((Boolean) -> Unit)? = null
     ) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
@@ -96,9 +104,19 @@ class VideoRecordingManager {
                 }
 
                 provider.unbindAll()
-                provider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, videoCapture)
 
-                Log.d(TAG, "Camera + Recorder bound successfully.")
+                val useCases = mutableListOf<UseCase>(preview, videoCapture!!)
+                if (frameAnalyzer != null) {
+                    val imageAnalysis = ImageAnalysis.Builder()
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .build()
+                    imageAnalysis.setAnalyzer(analysisExecutor, frameAnalyzer)
+                    useCases.add(imageAnalysis)
+                }
+
+                provider.bindToLifecycle(lifecycleOwner, cameraSelector, *useCases.toTypedArray())
+
+                Log.d(TAG, "Camera + Recorder bound successfully (useCases=${useCases.size}).")
                 onReady?.invoke(true)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to bind camera + recorder", e)

@@ -44,12 +44,21 @@ data class RemoteMotionAlert(
     val timestamp: Long
 )
 
+data class RemoteCommand(
+    val id: Long,
+    val deviceId: String,
+    val username: String,
+    val action: String,
+    val consumed: Boolean,
+    val timestamp: Long
+)
+
 class SupabaseService {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
         .build()
 
     private val baseUrl: String
@@ -67,6 +76,8 @@ class SupabaseService {
     private fun String?.isNull_or_blank(): Boolean = this == null || this.trim().isEmpty() || this == "MY_SUPABASE_URL"
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+
+    // ── Authentication ─────────────────────────────────────────────────────
 
     suspend fun signUpOrLogin(usernameInput: String, passwordInput: String): Result<SupabaseUser> = withContext(Dispatchers.IO) {
         try {
@@ -122,15 +133,18 @@ class SupabaseService {
                 val userId = userObj?.optString("id") ?: "usr_$cleanUsername"
                 return@withContext Result.success(SupabaseUser(userId, cleanUsername, token))
             } else {
-                // Direct custom authentication fallback
-                return@withContext Result.success(SupabaseUser("usr_$cleanUsername", cleanUsername, anonKey))
+                val errorJson = try { JSONObject(signUpResponseBody) } catch (_: Exception) { JSONObject() }
+                val errorMsg = errorJson.optString("msg",
+                    errorJson.optString("error_description", "Sign up failed. Check credentials."))
+                return@withContext Result.failure(Exception(errorMsg))
             }
         } catch (e: Exception) {
             Log.e("SupabaseService", "Auth error", e)
-            val cleanUsername = usernameInput.trim().lowercase()
-            Result.success(SupabaseUser("usr_$cleanUsername", cleanUsername, anonKey))
+            Result.failure(Exception("Network error: ${e.message}"))
         }
     }
+
+    // ── Stream Publishing (Camera → Cloud) ─────────────────────────────────
 
     suspend fun publishStream(
         username: String,
@@ -176,6 +190,8 @@ class SupabaseService {
         }
     }
 
+    // ── Stream Fetching (Viewer ← Cloud) ───────────────────────────────────
+
     suspend fun fetchStream(username: String): StreamData? = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder()
@@ -194,7 +210,7 @@ class SupabaseService {
                     val obj = array.getJSONObject(0)
                     return@withContext StreamData(
                         username = obj.optString("username", username),
-                        isLive = obj.optBoolean("is_live", true),
+                        isLive = obj.optBoolean("is_live", false),
                         torchOn = obj.optBoolean("torch_on", false),
                         lensFacingFront = obj.optBoolean("lens_facing_front", false),
                         sirenActive = obj.optBoolean("siren_active", false),
@@ -212,6 +228,8 @@ class SupabaseService {
             null
         }
     }
+
+    // ── Remote Control Update ──────────────────────────────────────────────
 
     suspend fun updateRemoteControl(
         username: String,
@@ -247,6 +265,8 @@ class SupabaseService {
         }
     }
 
+    // ── Motion Alert Logging ───────────────────────────────────────────────
+
     suspend fun logMotionAlert(
         username: String,
         deviceId: String,
@@ -254,7 +274,7 @@ class SupabaseService {
         severity: String,
         intensity: Float,
         description: String,
-        snapshotBase64: String?,
+        snapshotBase64: String? = null,
         torchTriggered: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -289,10 +309,8 @@ class SupabaseService {
         }
     }
 
-    /**
-     * Fetches unread motion alerts for the viewer from the cctv_viewer_inbox table.
-     * Returns a list ordered by newest first.
-     */
+    // ── Fetch Unread Motion Alerts ─────────────────────────────────────────
+
     suspend fun fetchUnreadMotionAlerts(username: String): List<RemoteMotionAlert> = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder()
@@ -338,9 +356,8 @@ class SupabaseService {
         }
     }
 
-    /**
-     * Marks a motion alert as acknowledged (dismissed by viewer).
-     */
+    // ── Acknowledge Motion Alert ───────────────────────────────────────────
+
     suspend fun acknowledgeMotionAlert(alertId: String): Boolean = withContext(Dispatchers.IO) {
         try {
             val bodyObj = JSONObject().apply {
@@ -363,10 +380,8 @@ class SupabaseService {
         }
     }
 
-    /**
-     * Registers the viewer device's FCM token so the camera
-     * side knows where to send push notifications.
-     */
+    // ── FCM Token Registration ─────────────────────────────────────────────
+
     suspend fun registerFcmToken(
         username: String,
         fcmToken: String,
@@ -396,6 +411,204 @@ class SupabaseService {
         } catch (e: Exception) {
             Log.e("SupabaseService", "registerFcmToken error", e)
             false
+        }
+    }
+
+    // ── Command Queue (Viewer → Camera) ────────────────────────────────────
+
+    suspend fun insertCommand(username: String, deviceId: String, action: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val bodyObj = JSONObject().apply {
+                put("username", username)
+                put("device_id", deviceId)
+                put("action", action)
+                put("consumed", false)
+                put("timestamp", System.currentTimeMillis())
+            }.toString().toRequestBody(jsonMediaType)
+
+            val request = Request.Builder()
+                .url("$baseUrl/rest/v1/cctv_commands")
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .header("Content-Type", "application/json")
+                .post(bodyObj)
+                .build()
+
+            val response = client.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "Insert command error", e)
+            false
+        }
+    }
+
+    /**
+     * Fetches unconsumed commands for a given device. Camera side polls this.
+     */
+    suspend fun fetchPendingCommands(deviceId: String): List<RemoteCommand> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url(
+                    "$baseUrl/rest/v1/cctv_commands" +
+                    "?device_id=eq.$deviceId" +
+                    "&consumed=eq.false" +
+                    "&order=timestamp.asc" +
+                    "&limit=20" +
+                    "&select=*"
+                )
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: ""
+
+            if (response.isSuccessful && body.startsWith("[")) {
+                val array = JSONArray(body)
+                (0 until array.length()).mapNotNull { i ->
+                    try {
+                        val obj = array.getJSONObject(i)
+                        RemoteCommand(
+                            id = obj.optLong("id", 0),
+                            deviceId = obj.optString("device_id", ""),
+                            username = obj.optString("username", ""),
+                            action = obj.optString("action", ""),
+                            consumed = obj.optBoolean("consumed", false),
+                            timestamp = obj.optLong("timestamp", 0)
+                        )
+                    } catch (e: Exception) { null }
+                }
+            } else emptyList()
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "fetchPendingCommands error", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Marks a command as consumed so it won't be fetched again.
+     */
+    suspend fun markCommandConsumed(commandId: Long): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val bodyObj = JSONObject().apply {
+                put("consumed", true)
+            }.toString().toRequestBody(jsonMediaType)
+
+            val request = Request.Builder()
+                .url("$baseUrl/rest/v1/cctv_commands?id=eq.$commandId")
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .header("Content-Type", "application/json")
+                .patch(bodyObj)
+                .build()
+
+            val response = client.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "markCommandConsumed error", e)
+            false
+        }
+    }
+
+    // ── Paired Device CRUD ─────────────────────────────────────────────────
+
+    suspend fun createPairedDevice(
+        username: String,
+        pairingCode: String,
+        deviceName: String,
+        ipAddress: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().apply {
+                put("username", username)
+                put("pairing_code", pairingCode)
+                put("device_name", deviceName)
+                put("ip_address", ipAddress)
+                put("created_at", System.currentTimeMillis())
+            }.toString().toRequestBody(jsonMediaType)
+
+            val request = Request.Builder()
+                .url("$baseUrl/rest/v1/cctv_paired_devices?on_conflict=pairing_code")
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .header("Content-Type", "application/json")
+                .header("Prefer", "resolution=merge-duplicates,return=minimal")
+                .post(body)
+                .build()
+
+            val response = client.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "Create paired device error", e)
+            false
+        }
+    }
+
+    suspend fun getPairedDeviceByCode(pairingCode: String): com.example.cctv.data.CctvDevice? = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("$baseUrl/rest/v1/cctv_paired_devices?pairing_code=eq.$pairingCode&select=*")
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: ""
+            if (response.isSuccessful && body.startsWith("[")) {
+                val array = JSONArray(body)
+                if (array.length() > 0) {
+                    val obj = array.getJSONObject(0)
+                    return@withContext com.example.cctv.data.CctvDevice(
+                        id = obj.optString("id", ""),
+                        name = obj.optString("device_name", "Paired Camera"),
+                        pairingCode = obj.optString("pairing_code", ""),
+                        ipAddress = obj.optString("ip_address", ""),
+                        isOnline = true,
+                        isStreaming = false,
+                        batteryLevel = 100
+                    )
+                }
+            }
+            null
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "Get paired device error", e)
+            null
+        }
+    }
+
+    suspend fun listDevicesForUser(username: String): List<com.example.cctv.data.CctvDevice> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("$baseUrl/rest/v1/cctv_paired_devices?username=eq.$username&select=*")
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: ""
+            if (response.isSuccessful && body.startsWith("[")) {
+                val array = JSONArray(body)
+                (0 until array.length()).mapNotNull { i ->
+                    try {
+                        val obj = array.getJSONObject(i)
+                        com.example.cctv.data.CctvDevice(
+                            id = obj.optString("id", ""),
+                            name = obj.optString("device_name", "Camera"),
+                            pairingCode = obj.optString("pairing_code", ""),
+                            ipAddress = obj.optString("ip_address", ""),
+                            isOnline = true,
+                            isStreaming = false,
+                            batteryLevel = 100
+                        )
+                    } catch (e: Exception) { null }
+                }
+            } else emptyList()
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "List devices error", e)
+            emptyList()
         }
     }
 }

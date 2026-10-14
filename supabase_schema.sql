@@ -129,7 +129,30 @@ CREATE POLICY "allow_all_inbox" ON public.cctv_viewer_inbox
     FOR ALL USING (TRUE) WITH CHECK (TRUE);
 
 -- ────────────────────────────────────────────────────────────
--- 6. HELPER FUNCTION – Auto-populate viewer inbox on motion
+-- 6. PAIRED DEVICES
+--    Stores pairing relationships between camera and viewer
+--    devices under the same user account.
+-- ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.cctv_paired_devices (
+    id               BIGSERIAL   PRIMARY KEY,
+    username         TEXT        NOT NULL,
+    pairing_code     TEXT        NOT NULL,
+    device_name      TEXT        NOT NULL DEFAULT 'Paired Camera',
+    ip_address       TEXT        NOT NULL DEFAULT '',
+    created_at       BIGINT      NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
+    UNIQUE(username, pairing_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_paired_devices_username ON public.cctv_paired_devices (username);
+CREATE INDEX IF NOT EXISTS idx_paired_devices_code ON public.cctv_paired_devices (pairing_code);
+
+ALTER TABLE public.cctv_paired_devices ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "allow_all_paired_devices" ON public.cctv_paired_devices
+    FOR ALL USING (TRUE) WITH CHECK (TRUE);
+
+-- ────────────────────────────────────────────────────────────
+-- 7. HELPER FUNCTION – Auto-populate viewer inbox on motion
 --    Trigger: after INSERT on cctv_motion_alerts →
 --    insert a row into cctv_viewer_inbox automatically.
 -- ────────────────────────────────────────────────────────────

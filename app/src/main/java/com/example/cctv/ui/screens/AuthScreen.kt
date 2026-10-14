@@ -211,7 +211,7 @@ fun AuthScreen(
                                     onAuthSuccess(user)
                                 },
                                 onFailure = {
-                                    errorMessage = "Login failed. Check your connection."
+                                    errorMessage = it.message ?: "Login failed. Check your connection."
                                 }
                             )
                         }
