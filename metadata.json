@@ -1,0 +1,6 @@
+{
+  "name": "Love CCTV",
+  "description": "Smart CCTV Home & Security Camera App with Live Streaming, Motion Detection & Remote Controls",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
