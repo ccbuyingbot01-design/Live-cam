@@ -29,29 +29,29 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       # ── 4. Install the Gradle wrapper script if missing ───────────────────────
-      # The repo contains gradle-wrapper.properties but no gradlew binary.
-      # We install the exact version declared in the wrapper properties file,
-      # then use `gradle wrapper` to emit the gradlew script into the project.
-      - name: Generate gradlew script
+      # The repo contains gradle-wrapper.properties but the wrapper JAR may be
+      # missing. We download Gradle, generate the wrapper files, and ensure
+      # gradlew is executable.
+      - name: Generate Gradle wrapper
         run: |
           # Read the declared Gradle version from the wrapper properties
           GRADLE_VERSION=$(grep -oP '(?<=gradle-)[0-9]+\.[0-9]+(\.[0-9]+)?(?=-bin)' gradle/wrapper/gradle-wrapper.properties)
           echo "Declared Gradle version: $GRADLE_VERSION"
 
-          # Install that version via SDKMAN-less approach: download and unpack
+          # Download and unpack Gradle distribution
           GRADLE_URL="https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
           curl -fsSL "$GRADLE_URL" -o /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /tmp/gradle-install
           GRADLE_BIN="/tmp/gradle-install/gradle-${GRADLE_VERSION}/bin/gradle"
           chmod +x "$GRADLE_BIN"
 
-          # Use that Gradle binary to re-generate gradlew in the project root
+          # Use that Gradle binary to re-generate gradlew + wrapper jar
           "$GRADLE_BIN" wrapper --gradle-version "$GRADLE_VERSION" --distribution-type bin
           chmod +x gradlew
           echo "gradlew created successfully."
-          ls -la gradlew
+          ls -la gradlew gradle/wrapper/
 
-      # ── 5. Generate a debug keystore (referenced by debugConfig in build.gradle) ─
+      # ── 5. Generate a debug keystore ─────────────────────────────────────────
       - name: Generate Debug Keystore
         run: |
           keytool -genkeypair \
@@ -74,7 +74,39 @@ jobs:
             echo "app/.env created from .env.example"
           fi
 
-      # ── 7. Cache Gradle dependencies ─────────────────────────────────────────
+      # ── 7. Ensure google-services.json exists ─────────────────────────────────
+      - name: Ensure google-services.json
+        run: |
+          if [ ! -f "app/google-services.json" ]; then
+            echo '{
+              "project_info": {
+                "project_number": "1234567890",
+                "project_id": "live-cam",
+                "storage_bucket": "live-cam.appspot.com"
+              },
+              "client": [
+                {
+                  "client_info": {
+                    "mobilesdk_app_id": "1:1234567890:android:abcdef123456",
+                    "android_client_info": {
+                      "package_name": "com.aistudio.lovecctv.cam"
+                    }
+                  },
+                  "api_key": [
+                    {
+                      "current_key": "AIzaSyDummyKeyForBuild"
+                    }
+                  ]
+                }
+              ],
+              "configuration_version": "1"
+            }' > app/google-services.json
+            echo "google-services.json placeholder created."
+          else
+            echo "google-services.json already exists."
+          fi
+
+      # ── 8. Cache Gradle dependencies ─────────────────────────────────────────
       - name: Cache Gradle packages
         uses: actions/cache@v4
         with:
@@ -85,7 +117,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      # ── 8. Build debug APK ────────────────────────────────────────────────────
+      # ── 9. Build debug APK ────────────────────────────────────────────────────
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace --no-daemon
         env:
@@ -95,7 +127,7 @@ jobs:
           STORE_PASSWORD: android
           KEY_PASSWORD: android
 
-      # ── 9. Upload APK artifact ────────────────────────────────────────────────
+      # ── 10. Upload APK artifact ───────────────────────────────────────────────
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:

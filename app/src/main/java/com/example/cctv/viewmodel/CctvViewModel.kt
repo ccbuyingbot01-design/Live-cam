@@ -483,6 +483,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
             toggleTorch() // turn off after delay
         }
     }
+            private fun monitorBatteryState() {
         try {
             val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
             val batteryStatus: Intent? = getApplication<Application>().registerReceiver(null, filter)
@@ -502,6 +503,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
             e.printStackTrace()
         }
     }
+
 
     override fun onCleared() {
         super.onCleared()
