@@ -17,8 +17,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Nightlight
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +50,7 @@ fun RemoteControlPanel(
     onToggleSiren: () -> Unit,
     onToggleLens: () -> Unit,
     onToggleNightVision: () -> Unit,
+    onToggleRecording: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -69,6 +72,7 @@ fun RemoteControlPanel(
 
         Spacer(modifier = Modifier.height(14.dp))
 
+        // Row 1: Core controls
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
@@ -113,6 +117,18 @@ fun RemoteControlPanel(
                 testTag = "remote_night_btn"
             )
         }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Row 2: Record button (full-width accent button)
+        ControlButton(
+            icon = if (device.isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
+            label = if (device.isRecording) "Stop Recording" else "Start Record",
+            isActive = device.isRecording,
+            activeColor = LoveAlertRed,
+            onClick = onToggleRecording,
+            testTag = "remote_record_btn"
+        )
     }
 }
 

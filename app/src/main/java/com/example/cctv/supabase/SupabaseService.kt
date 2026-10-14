@@ -27,7 +27,21 @@ data class StreamData(
     val nightVision: Boolean,
     val batteryLevel: Int,
     val frameBase64: String?,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val recordingActive: Boolean = false
+)
+
+data class RemoteMotionAlert(
+    val id: String,
+    val username: String,
+    val deviceId: String,
+    val deviceName: String,
+    val severity: String,
+    val intensity: Float,
+    val description: String,
+    val snapshotBase64: String?,
+    val torchTriggered: Boolean,
+    val timestamp: Long
 )
 
 class SupabaseService {
@@ -126,7 +140,8 @@ class SupabaseService {
         sirenActive: Boolean,
         nightVision: Boolean,
         batteryLevel: Int,
-        frameBase64: String?
+        frameBase64: String?,
+        recordingActive: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val bodyJson = JSONObject().apply {
@@ -137,6 +152,7 @@ class SupabaseService {
                 put("siren_active", sirenActive)
                 put("night_vision", nightVision)
                 put("battery_level", batteryLevel)
+                put("recording_active", recordingActive)
                 if (frameBase64 != null) {
                     put("frame_base64", frameBase64)
                 }
@@ -185,7 +201,8 @@ class SupabaseService {
                         nightVision = obj.optBoolean("night_vision", false),
                         batteryLevel = obj.optInt("battery_level", 85),
                         frameBase64 = obj.optString("frame_base64", null),
-                        updatedAt = obj.optLong("updated_at", System.currentTimeMillis())
+                        updatedAt = obj.optLong("updated_at", System.currentTimeMillis()),
+                        recordingActive = obj.optBoolean("recording_active", false)
                     )
                 }
             }
@@ -201,7 +218,8 @@ class SupabaseService {
         torchOn: Boolean? = null,
         sirenActive: Boolean? = null,
         lensFacingFront: Boolean? = null,
-        nightVision: Boolean? = null
+        nightVision: Boolean? = null,
+        recordingActive: Boolean? = null
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val bodyObj = JSONObject().apply {
@@ -209,6 +227,7 @@ class SupabaseService {
                 sirenActive?.let { put("siren_active", it) }
                 lensFacingFront?.let { put("lens_facing_front", it) }
                 nightVision?.let { put("night_vision", it) }
+                recordingActive?.let { put("recording_active", it) }
                 put("updated_at", System.currentTimeMillis())
             }.toString().toRequestBody(jsonMediaType)
 
@@ -231,16 +250,23 @@ class SupabaseService {
     suspend fun logMotionAlert(
         username: String,
         deviceId: String,
+        deviceName: String,
         severity: String,
+        intensity: Float,
         description: String,
-        snapshotBase64: String?
+        snapshotBase64: String?,
+        torchTriggered: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val bodyObj = JSONObject().apply {
                 put("username", username)
                 put("device_id", deviceId)
+                put("device_name", deviceName)
                 put("severity", severity)
+                put("intensity", intensity)
                 put("description", description)
+                put("torch_triggered", torchTriggered)
+                put("acknowledged", false)
                 if (snapshotBase64 != null) {
                     put("snapshot_base64", snapshotBase64)
                 }
@@ -248,7 +274,7 @@ class SupabaseService {
             }.toString().toRequestBody(jsonMediaType)
 
             val request = Request.Builder()
-                .url("$baseUrl/rest/v1/cctv_motion_logs")
+                .url("$baseUrl/rest/v1/cctv_motion_alerts")
                 .header("apikey", anonKey)
                 .header("Authorization", "Bearer $anonKey")
                 .header("Content-Type", "application/json")
@@ -259,6 +285,116 @@ class SupabaseService {
             response.isSuccessful
         } catch (e: Exception) {
             Log.e("SupabaseService", "Log motion error", e)
+            false
+        }
+    }
+
+    /**
+     * Fetches unread motion alerts for the viewer from the cctv_viewer_inbox table.
+     * Returns a list ordered by newest first.
+     */
+    suspend fun fetchUnreadMotionAlerts(username: String): List<RemoteMotionAlert> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url(
+                    "$baseUrl/rest/v1/cctv_motion_alerts" +
+                    "?username=eq.$username" +
+                    "&acknowledged=eq.false" +
+                    "&order=timestamp.desc" +
+                    "&limit=10" +
+                    "&select=*"
+                )
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: ""
+
+            if (response.isSuccessful && body.startsWith("[")) {
+                val array = JSONArray(body)
+                (0 until array.length()).mapNotNull { i ->
+                    try {
+                        val obj = array.getJSONObject(i)
+                        RemoteMotionAlert(
+                            id = obj.optString("id", ""),
+                            username = obj.optString("username", username),
+                            deviceId = obj.optString("device_id", ""),
+                            deviceName = obj.optString("device_name", "Camera"),
+                            severity = obj.optString("severity", "LOW"),
+                            intensity = obj.optDouble("intensity", 0.0).toFloat(),
+                            description = obj.optString("description", ""),
+                            snapshotBase64 = obj.optString("snapshot_base64", null),
+                            torchTriggered = obj.optBoolean("torch_triggered", false),
+                            timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                        )
+                    } catch (e: Exception) { null }
+                }
+            } else emptyList()
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "fetchUnreadAlerts error", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Marks a motion alert as acknowledged (dismissed by viewer).
+     */
+    suspend fun acknowledgeMotionAlert(alertId: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val bodyObj = JSONObject().apply {
+                put("acknowledged", true)
+            }.toString().toRequestBody(jsonMediaType)
+
+            val request = Request.Builder()
+                .url("$baseUrl/rest/v1/cctv_motion_alerts?id=eq.$alertId")
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .header("Content-Type", "application/json")
+                .patch(bodyObj)
+                .build()
+
+            val response = client.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "acknowledgeAlert error", e)
+            false
+        }
+    }
+
+    /**
+     * Registers the viewer device's FCM token so the camera
+     * side knows where to send push notifications.
+     */
+    suspend fun registerFcmToken(
+        username: String,
+        fcmToken: String,
+        deviceLabel: String = "My Phone",
+        isViewer: Boolean = true
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val bodyObj = JSONObject().apply {
+                put("username", username)
+                put("fcm_token", fcmToken)
+                put("device_label", deviceLabel)
+                put("is_viewer", isViewer)
+                put("last_seen", System.currentTimeMillis())
+            }.toString().toRequestBody(jsonMediaType)
+
+            val request = Request.Builder()
+                .url("$baseUrl/rest/v1/cctv_fcm_tokens?on_conflict=fcm_token")
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .header("Content-Type", "application/json")
+                .header("Prefer", "resolution=merge-duplicates,return=minimal")
+                .post(bodyObj)
+                .build()
+
+            val response = client.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "registerFcmToken error", e)
             false
         }
     }

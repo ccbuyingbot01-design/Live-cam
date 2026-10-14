@@ -34,6 +34,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -64,6 +66,21 @@ fun CameraPreviewOverlay(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val isRecording by viewModel.isRecording.collectAsState()
+    val recordingDuration by viewModel.recordingDurationSeconds.collectAsState()
+    val pendingAutoRecord by viewModel.pendingAutoRecord.collectAsState()
+
+    // Auto-start recording when camera first opens in Camera Sender mode
+    LaunchedEffect(Unit) {
+        viewModel.autoStartRecording(context)
+    }
+
+    // React to remote viewer commanding a start-recording
+    LaunchedEffect(pendingAutoRecord) {
+        if (pendingAutoRecord) {
+            viewModel.autoStartRecording(context)
+        }
+    }
 
     val infiniteTransition = rememberInfiniteTransition(label = "rec_pulse")
     val pulseAlpha by infiniteTransition.animateFloat(
@@ -82,7 +99,7 @@ fun CameraPreviewOverlay(
             .background(Color.Black)
             .testTag("camera_preview_container")
     ) {
-        // CameraX Surface View
+        // CameraX Surface View — uses VideoCapture-capable binding
         AndroidView(
             factory = { ctx ->
                 PreviewView(ctx).apply {
@@ -94,7 +111,7 @@ fun CameraPreviewOverlay(
                 }
             },
             update = { previewView ->
-                viewModel.bindCameraToPreview(context, lifecycleOwner, previewView)
+                viewModel.bindCameraWithRecorder(context, lifecycleOwner, previewView)
             },
             modifier = Modifier.fillMaxSize()
         )
@@ -142,29 +159,58 @@ fun CameraPreviewOverlay(
                 .align(Alignment.TopStart),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // LIVE Recording Badge
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color.Black.copy(alpha = 0.65f))
-                    .border(1.dp, LoveAlertRed.copy(alpha = 0.8f), RoundedCornerShape(20.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
+            if (isRecording) {
+                // REC badge with live timer
+                Row(
                     modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(LoveAlertRed.copy(alpha = pulseAlpha))
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "LIVE STREAM",
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
-                )
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(LoveAlertRed.copy(alpha = 0.85f))
+                        .border(1.dp, LoveAlertRed, RoundedCornerShape(20.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = pulseAlpha))
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    val minutes = recordingDuration / 60
+                    val seconds = recordingDuration % 60
+                    Text(
+                        text = "REC  %02d:%02d".format(minutes, seconds),
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            } else {
+                // LIVE STREAM badge
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color.Black.copy(alpha = 0.65f))
+                        .border(1.dp, LoveAlertRed.copy(alpha = 0.8f), RoundedCornerShape(20.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(LoveAlertRed.copy(alpha = pulseAlpha))
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "LIVE STREAM",
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.weight(1f))

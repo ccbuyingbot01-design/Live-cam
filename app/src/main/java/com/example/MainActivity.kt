@@ -114,8 +114,15 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.CAMERA,
             Manifest.permission.RECORD_AUDIO
         )
+        // Android 13+ granular media permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             perms.add(Manifest.permission.POST_NOTIFICATIONS)
+            perms.add(Manifest.permission.READ_MEDIA_VIDEO)
+        }
+        // Android 9 and below need WRITE_EXTERNAL_STORAGE to save videos to SD card
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            perms.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            perms.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
 
         val missing = perms.filter {

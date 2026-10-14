@@ -33,7 +33,9 @@ data class CctvDevice(
     val sirenActive: Boolean = false,
     val nightVision: Boolean = false,
     val ipAddress: String = "192.168.1.105",
-    val fps: Int = 30
+    val fps: Int = 30,
+    // Remote-controllable recording state (set by viewer, obeyed by camera)
+    val isRecording: Boolean = false
 )
 
 @Keep

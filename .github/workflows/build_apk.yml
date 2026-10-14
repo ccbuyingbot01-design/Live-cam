@@ -13,24 +13,93 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      # ── 2. Java setup (AGP 9.x requires JDK 21) ──────────────────────────────
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
-          cache: gradle
 
-      - name: Grant Execute Permission for Gradle
-        run: chmod +x gradlew || true
+      # ── 3. Set up Gradle (caches + installs wrapper binary) ──────────────────
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Build Debug APK with Gradle
-        run: gradle assembleDebug --stacktrace
+      # ── 4. Install the Gradle wrapper script if missing ───────────────────────
+      # The repo contains gradle-wrapper.properties but no gradlew binary.
+      # We install the exact version declared in the wrapper properties file,
+      # then use `gradle wrapper` to emit the gradlew script into the project.
+      - name: Generate gradlew script
+        run: |
+          # Read the declared Gradle version from the wrapper properties
+          GRADLE_VERSION=$(grep -oP '(?<=gradle-)[0-9]+\.[0-9]+(\.[0-9]+)?(?=-bin)' gradle/wrapper/gradle-wrapper.properties)
+          echo "Declared Gradle version: $GRADLE_VERSION"
 
-      - name: Upload Debug APK Artifact
+          # Install that version via SDKMAN-less approach: download and unpack
+          GRADLE_URL="https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+          curl -fsSL "$GRADLE_URL" -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp/gradle-install
+          GRADLE_BIN="/tmp/gradle-install/gradle-${GRADLE_VERSION}/bin/gradle"
+          chmod +x "$GRADLE_BIN"
+
+          # Use that Gradle binary to re-generate gradlew in the project root
+          "$GRADLE_BIN" wrapper --gradle-version "$GRADLE_VERSION" --distribution-type bin
+          chmod +x gradlew
+          echo "gradlew created successfully."
+          ls -la gradlew
+
+      # ── 5. Generate a debug keystore (referenced by debugConfig in build.gradle) ─
+      - name: Generate Debug Keystore
+        run: |
+          keytool -genkeypair \
+            -v \
+            -keystore debug.keystore \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US"
+          echo "debug.keystore created."
+
+      # ── 6. Copy .env.example → app/.env for the secrets-gradle-plugin ────────
+      - name: Create .env from example
+        run: |
+          if [ -f ".env.example" ]; then
+            cp .env.example app/.env
+            echo "app/.env created from .env.example"
+          fi
+
+      # ── 7. Cache Gradle dependencies ─────────────────────────────────────────
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/libs.versions.toml', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # ── 8. Build debug APK ────────────────────────────────────────────────────
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
+        env:
+          # Provide values for release signingConfig env vars so Gradle config
+          # phase does not fail (storeFile must point to an existing file).
+          KEYSTORE_PATH: ${{ github.workspace }}/debug.keystore
+          STORE_PASSWORD: android
+          KEY_PASSWORD: android
+
+      # ── 9. Upload APK artifact ────────────────────────────────────────────────
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: love-cctv-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

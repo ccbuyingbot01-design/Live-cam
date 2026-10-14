@@ -1,10 +1,15 @@
 package com.example.cctv.ui.screens
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -28,11 +33,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Card
@@ -46,6 +53,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,6 +69,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.cctv.service.CctvForegroundService
 import com.example.cctv.ui.components.CameraPreviewOverlay
 import com.example.cctv.ui.components.MotionMeterBar
@@ -84,8 +93,46 @@ fun CameraModeScreen(
     val context = LocalContext.current
     val currentDevice by viewModel.currentDevice.collectAsState()
     val isSirenActive by viewModel.isSirenRinging.collectAsState()
+    val isRecording by viewModel.isRecording.collectAsState()
+    val recordingMessage by viewModel.recordingMessage.collectAsState()
     var showQrDialog by remember { mutableStateOf(false) }
     var isServiceRunning by remember { mutableStateOf(CctvForegroundService.isServiceRunning) }
+
+    // ── Storage permission launcher ────────────────────────────────────
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val allGranted = results.values.all { it }
+        if (allGranted) {
+            viewModel.startVideoRecording(context)
+        } else {
+            Toast.makeText(
+                context,
+                "Storage permission is required to save videos to SD card.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    // Show toast when recording finishes or errors
+    LaunchedEffect(recordingMessage) {
+        recordingMessage?.let { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            viewModel.dismissRecordingMessage()
+        }
+    }
+
+    // Helper: check + request permissions before starting recording
+    fun requestStorageAndRecord() {
+        val needed = viewModel.videoRecordingManager.requiredPermissions().filter { perm ->
+            ContextCompat.checkSelfPermission(context, perm) != PackageManager.PERMISSION_GRANTED
+        }
+        if (needed.isEmpty()) {
+            viewModel.startVideoRecording(context)
+        } else {
+            permissionLauncher.launch(needed.toTypedArray())
+        }
+    }
 
     Box(
         modifier = modifier
@@ -242,6 +289,22 @@ fun CameraModeScreen(
                         horizontalArrangement = Arrangement.SpaceAround,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Record / Stop Recording Button
+                        ActionButton(
+                            icon = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
+                            label = if (isRecording) "Stop" else "Record",
+                            isActive = isRecording,
+                            activeColor = LoveAlertRed,
+                            onClick = {
+                                if (isRecording) {
+                                    viewModel.stopVideoRecording()
+                                } else {
+                                    requestStorageAndRecord()
+                                }
+                            },
+                            testTag = "btn_video_record"
+                        )
+
                         // Torch Toggle Button
                         ActionButton(
                             icon = Icons.Default.FlashOn,

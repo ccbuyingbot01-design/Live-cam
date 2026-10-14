@@ -365,7 +365,8 @@ fun ViewerModeScreen(
                 onToggleTorch = { viewModel.remoteToggleTorch(activeCamera.id) },
                 onToggleSiren = { viewModel.remoteToggleSiren(activeCamera.id) },
                 onToggleLens = { viewModel.remoteToggleLens(activeCamera.id) },
-                onToggleNightVision = { viewModel.remoteToggleNightVision(activeCamera.id) }
+                onToggleNightVision = { viewModel.remoteToggleNightVision(activeCamera.id) },
+                onToggleRecording = { viewModel.remoteToggleRecording(activeCamera.id) }
             )
         }
 

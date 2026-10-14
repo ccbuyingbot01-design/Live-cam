@@ -128,6 +128,11 @@ class CctvRepository {
         syncDeviceStateToCloud()
     }
 
+    fun setRecordingState(active: Boolean) {
+        _currentDevice.value = _currentDevice.value.copy(isRecording = active)
+        syncDeviceStateToCloud()
+    }
+
     fun updateBatteryStatus(level: Int, charging: Boolean) {
         _currentDevice.value = _currentDevice.value.copy(
             batteryLevel = level.coerceIn(0, 100),
@@ -166,6 +171,15 @@ class CctvRepository {
         }
         _pairedDevices.value = updated
         remoteCommandCloud(deviceId, "toggle_night_vision")
+    }
+
+    fun remoteToggleRecording(deviceId: String) {
+        val updated = _pairedDevices.value.map { dev ->
+            if (dev.id == deviceId) dev.copy(isRecording = !dev.isRecording) else dev
+        }
+        _pairedDevices.value = updated
+        val newState = updated.find { it.id == deviceId }?.isRecording ?: false
+        remoteCommandCloud(deviceId, if (newState) "start_recording" else "stop_recording")
     }
 
     fun pairNewDeviceByCode(code: String): Boolean {
