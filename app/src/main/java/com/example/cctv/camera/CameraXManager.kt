@@ -40,7 +40,9 @@ class CameraXManager {
                 val provider = cameraProviderFuture.get()
                 cameraProvider = provider
 
-                val preview = Preview.Builder().build().also {
+                val preview = Preview.Builder()
+                    .setTargetResolution(android.util.Size(640, 360))
+                    .build().also {
                     it.surfaceProvider = previewView.surfaceProvider
                 }
 
@@ -57,6 +59,7 @@ class CameraXManager {
                 if (motionAnalyzer != null) {
                     val imageAnalysis = ImageAnalysis.Builder()
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .setTargetResolution(android.util.Size(640, 360))
                         .build()
 
                     imageAnalysis.setAnalyzer(analysisExecutor, motionAnalyzer)

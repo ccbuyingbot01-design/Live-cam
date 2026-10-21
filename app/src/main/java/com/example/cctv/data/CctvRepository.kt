@@ -181,6 +181,7 @@ class CctvRepository {
                 deviceName = dev.name,
                 ipAddress = dev.ipAddress
             )
+            Log.d("CctvRepository", "Device registered for user: $user")
             // Fetch existing paired devices for this user
             refreshPairedDevices()
         }
@@ -222,6 +223,7 @@ class CctvRepository {
         // Exclude self
         val selfCode = _currentDevice.value.pairingCode
         val filtered = devices.filter { it.pairingCode != selfCode }
+        Log.d("CctvRepository", "Found ${filtered.size} devices for user: $user")
         _pairedDevices.value = filtered
         if (_selectedCameraId.value.isBlank() && filtered.isNotEmpty()) {
             _selectedCameraId.value = filtered.first().id

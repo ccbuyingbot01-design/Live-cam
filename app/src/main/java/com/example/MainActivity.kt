@@ -145,6 +145,12 @@ fun LoveCctvApp(
     val deviceMode by viewModel.deviceMode.collectAsState()
     val motionEvents by viewModel.motionEvents.collectAsState()
 
+    androidx.compose.runtime.LaunchedEffect(supabaseUser) {
+        if (supabaseUser != null && currentDestination == AppDestination.AUTH) {
+            currentDestination = AppDestination.ROLE_CHOICE
+        }
+    }
+
     Scaffold(
         topBar = {
             if (currentDestination == AppDestination.SURVEILLANCE_MAIN) {

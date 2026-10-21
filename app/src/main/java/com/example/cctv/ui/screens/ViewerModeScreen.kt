@@ -27,14 +27,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SignalCellularAlt
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -91,6 +96,10 @@ fun ViewerModeScreen(
     var pairingCodeInput by remember { mutableStateOf("") }
     var showPairInput by remember { mutableStateOf(false) }
     var showQrScanner by remember { mutableStateOf(false) }
+
+    // Direct UDP / Hardware-accelerated live stream frame (zero-latency buffer clearing)
+    val liveStreamBitmap by viewModel.liveStreamBitmap.collectAsState()
+    var isFullScreen by remember { mutableStateOf(false) }
 
     // Cloud stream data
     val remoteFrame by viewModel.remoteFrameBase64.collectAsState()
@@ -251,7 +260,7 @@ fun ViewerModeScreen(
             }
         }
 
-        // Live Feed Screen Display Canvas
+        // Live Feed Screen Display Canvas (Tap for Full Screen)
         if (activeCamera != null) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color.Black),
@@ -260,33 +269,26 @@ fun ViewerModeScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1.33f)
+                    .clickable { isFullScreen = true }
                     .testTag("viewer_feed_player")
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // Live Frame Display from Cloud
-                    if (remoteStreamLive && remoteFrame != null) {
-                        val bitmap = remember(remoteFrame) {
+                    val displayBitmap = liveStreamBitmap ?: remember(remoteFrame) {
+                        if (remoteStreamLive && remoteFrame != null) {
                             try {
                                 val bytes = Base64.decode(remoteFrame, Base64.DEFAULT)
                                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                             } catch (e: Exception) { null }
-                        }
-                        if (bitmap != null) {
-                            androidx.compose.foundation.Image(
-                                bitmap = bitmap.asImageBitmap(),
-                                contentDescription = "Live Camera Feed",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            // Frame decode error
-                            Box(
-                                modifier = Modifier.fillMaxSize().background(Color(0xFF080D1A)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("Decoding frame...", color = TextSecondary, fontSize = 12.sp)
-                            }
-                        }
+                        } else null
+                    }
+
+                    if (displayBitmap != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = displayBitmap.asImageBitmap(),
+                            contentDescription = "Live Camera Feed",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
 
                         // Night vision overlay
                         if (activeCamera.nightVision) {
@@ -315,13 +317,13 @@ fun ViewerModeScreen(
                                     modifier = Modifier.size(48.dp)
                                 )
                                 Text(
-                                    text = if (activeCamera.isOnline) "Waiting for camera stream..." else "Camera Offline",
+                                    text = if (activeCamera.isOnline) "Waiting for live stream..." else "Camera Offline",
                                     color = TextSecondary,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium
                                 )
                                 Text(
-                                    text = "Make sure the camera phone is running in Live Cam mode",
+                                    text = "Tap screen to expand full size • 480p @ 15 FPS Direct P2P",
                                     color = TextSecondary.copy(alpha = 0.6f),
                                     fontSize = 11.sp,
                                     textAlign = TextAlign.Center
@@ -402,8 +404,8 @@ fun ViewerModeScreen(
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = if (remoteStreamLive) "CLOUD STREAM ACTIVE" else "NO SIGNAL",
-                                    color = Color.White,
+                                    text = if (liveStreamBitmap != null) "DIRECT P2P LIVE (15 FPS)" else if (remoteStreamLive) "CLOUD STREAM ACTIVE" else "NO SIGNAL",
+                                    color = if (liveStreamBitmap != null) SecurityGreen else Color.White,
                                     fontSize = 10.sp,
                                     fontFamily = FontFamily.Monospace
                                 )
@@ -502,6 +504,88 @@ fun ViewerModeScreen(
                     showQrScanner = false
                 }
             )
+        }
+
+        // Full Size Live Camera View Dialog (Tap to expand full screen)
+        if (isFullScreen && activeCamera != null) {
+            Dialog(
+                onDismissRequest = { isFullScreen = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                ) {
+                    val displayBitmap = liveStreamBitmap ?: remember(remoteFrame) {
+                        if (remoteStreamLive && remoteFrame != null) {
+                            try {
+                                val bytes = Base64.decode(remoteFrame, Base64.DEFAULT)
+                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            } catch (e: Exception) { null }
+                        } else null
+                    }
+
+                    if (displayBitmap != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = displayBitmap.asImageBitmap(),
+                            contentDescription = "Full Size Live Stream",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
+
+                        if (activeCamera.nightVision) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(NightVisionGreen.copy(alpha = 0.15f))
+                            )
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Waiting for live feed...", color = Color.White)
+                        }
+                    }
+
+                    // Top Bar with Close Fullscreen button
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                            .align(Alignment.TopStart),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.Black.copy(alpha = 0.7f))
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "${activeCamera.name.uppercase()} • 480p @ 15 FPS (ZERO DELAY)",
+                                color = NeonCyanPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        IconButton(
+                            onClick = { isFullScreen = false },
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.7f))
+                        ) {
+                            Icon(Icons.Default.FullscreenExit, contentDescription = "Exit Fullscreen", tint = Color.White)
+                        }
+                    }
+                }
+            }
         }
     }
 }

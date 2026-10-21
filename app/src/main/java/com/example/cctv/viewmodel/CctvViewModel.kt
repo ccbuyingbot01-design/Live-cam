@@ -12,6 +12,8 @@ import androidx.camera.view.PreviewView
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.example.cctv.camera.HardwareMediaCodecEncoder
+import com.example.cctv.webrtc.UdpStreamManager
 import com.example.cctv.camera.CameraXManager
 import com.example.cctv.camera.FrameCaptureAnalyzer
 import com.example.cctv.camera.MotionDetector
@@ -24,11 +26,13 @@ import com.example.cctv.data.MotionEvent
 import com.example.cctv.service.CctvForegroundService
 import com.example.cctv.supabase.SupabaseService
 import com.example.cctv.supabase.SupabaseUser
+import com.example.cctv.data.SessionManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class CctvViewModel(application: Application) : AndroidViewModel(application) {
@@ -38,6 +42,9 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     val sirenPlayer = SirenPlayer()
     val supabaseService = SupabaseService()
     val videoRecordingManager = VideoRecordingManager()
+    val sessionManager = SessionManager(application)
+    val udpStreamManager = UdpStreamManager()
+    val hardwareEncoder = HardwareMediaCodecEncoder(width = 640, height = 480, frameRate = 15)
 
     val deviceMode = repository.deviceMode
     val currentDevice = repository.currentDevice
@@ -79,6 +86,13 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     private val _remoteStreamLive = MutableStateFlow(false)
     val remoteStreamLive: StateFlow<Boolean> = _remoteStreamLive.asStateFlow()
 
+    // ── Ultra-Low-Latency P2P/UDP Stream Frame for Viewer (Zero-Buffer-Delay) ──
+    private val _liveStreamBitmap = MutableStateFlow<Bitmap?>(null)
+    val liveStreamBitmap: StateFlow<Bitmap?> = _liveStreamBitmap.asStateFlow()
+
+    private val _isHardwareEncoding = MutableStateFlow(true)
+    val isHardwareEncoding: StateFlow<Boolean> = _isHardwareEncoding.asStateFlow()
+
     // Latest captured frame for cloud streaming (camera side)
     private val _latestFrameBase64 = MutableStateFlow<String?>(null)
     val latestFrameBase64: StateFlow<String?> = _latestFrameBase64.asStateFlow()
@@ -94,7 +108,43 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         monitorBatteryState()
+        initUdpStreaming()
         startSupabaseRealtimeLoop()
+        loadSavedSession()
+        observeConnectionForAutoRecord()
+    }
+
+    private fun initUdpStreaming() {
+        udpStreamManager.onNewLiveFrame = { bitmap ->
+            _liveStreamBitmap.value = bitmap
+            _remoteStreamLive.value = true
+        }
+        if (deviceMode.value == DeviceMode.VIEWER_MONITOR) {
+            udpStreamManager.startReceiver()
+        } else {
+            udpStreamManager.startSender()
+        }
+    }
+
+    private fun observeConnectionForAutoRecord() {
+        viewModelScope.launch {
+            repository.isCloudConnected.collect { connected ->
+                if (connected && deviceMode.value == DeviceMode.CAMERA_SENDER) {
+                    if (!_isRecording.value) {
+                        autoStartRecording(getApplication())
+                    }
+                }
+            }
+        }
+    }
+
+    private fun loadSavedSession() {
+        viewModelScope.launch {
+            val username = sessionManager.username.first()
+            if (!username.isNullOrBlank()) {
+                setSupabaseUser(SupabaseUser(id = "auto_$username", username = username, accessToken = "auto"))
+            }
+        }
     }
 
     // ── Auto-start support ────────────────────────────────────────────────────
@@ -111,10 +161,23 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     fun setSupabaseUser(user: SupabaseUser) {
         _supabaseUser.value = user
         repository.setUsername(user.username)
+        viewModelScope.launch {
+            sessionManager.saveUsername(user.username)
+        }
     }
 
     fun setDeviceMode(mode: DeviceMode) {
         repository.setDeviceMode(mode)
+        if (mode == DeviceMode.VIEWER_MONITOR) {
+            udpStreamManager.stopSender()
+            udpStreamManager.startReceiver()
+        } else {
+            udpStreamManager.stopReceiver()
+            udpStreamManager.startSender()
+            if (_isHardwareEncoding.value) {
+                hardwareEncoder.start()
+            }
+        }
         if (mode != DeviceMode.CAMERA_SENDER && _isRecording.value) {
             stopVideoRecording()
         }
@@ -143,6 +206,10 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         previewView: PreviewView
     ) {
         val dev = currentDevice.value
+        udpStreamManager.startSender()
+        if (_isHardwareEncoding.value) {
+            hardwareEncoder.start()
+        }
         videoRecordingManager.startCameraWithRecorder(
             context = context,
             lifecycleOwner = lifecycleOwner,
@@ -153,16 +220,30 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Creates a FrameCaptureAnalyzer that captures JPEG frames
-     * and stores them for cloud publishing.
+     * Creates a FrameCaptureAnalyzer strictly locked to 15 FPS (66ms) at 480p/360p.
+     * Offloads raw NV21 frames to native MediaCodec hardware encoder and
+     * streams lightweight compressed frames directly peer-to-peer over UDP.
      */
     private fun createFrameAnalyzer(): FrameCaptureAnalyzer {
         return FrameCaptureAnalyzer(
             onFrameCaptured = { base64 ->
                 _latestFrameBase64.value = base64
             },
-            intervalMs = 1500L,
-            jpegQuality = 35
+            onCompressedBytesCaptured = { bytes ->
+                // Direct UDP transport broadcast: instant delivery, zero lag, no database bottleneck
+                udpStreamManager.sendFrame(bytes, "255.255.255.255", UdpStreamManager.DEFAULT_PORT)
+                val devIp = currentDevice.value.ipAddress
+                if (devIp.isNotBlank() && devIp != "0.0.0.0") {
+                    udpStreamManager.sendFrame(bytes, devIp, UdpStreamManager.DEFAULT_PORT)
+                }
+            },
+            onRawNv21Captured = { nv21, _, _ ->
+                if (_isHardwareEncoding.value) {
+                    hardwareEncoder.encodeFrame(nv21)
+                }
+            },
+            intervalMs = 66L, // Strictly 15 FPS
+            jpegQuality = 42 // 480p lightweight stream
         )
     }
 
@@ -343,27 +424,34 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startSupabaseRealtimeLoop() {
         viewModelScope.launch {
+            var lastCloudPublishTime = 0L
             while (true) {
                 try {
                     val user = _supabaseUser.value
                     if (user != null) {
+                        val now = System.currentTimeMillis()
                         if (deviceMode.value == DeviceMode.CAMERA_SENDER) {
-                            // Camera mode: publish stream + poll for commands
                             val dev = currentDevice.value
-                            val publishOk = repository.supabaseService.publishStream(
-                                username = user.username,
-                                isLive = true,
-                                torchOn = dev.torchOn,
-                                lensFacingFront = dev.lensFacingFront,
-                                sirenActive = dev.sirenActive,
-                                nightVision = dev.nightVision,
-                                batteryLevel = dev.batteryLevel,
-                                frameBase64 = _latestFrameBase64.value,
-                                recordingActive = _isRecording.value
-                            )
-                            repository.setCloudConnected(publishOk)
 
-                            // Poll for remote commands from viewer
+                            // Only publish cloud snapshot every 1500ms to eliminate HTTP serialization lag
+                            // Real-time video is streamed peer-to-peer over UDP/hardware encoder!
+                            if (now - lastCloudPublishTime >= 1500L) {
+                                lastCloudPublishTime = now
+                                val publishOk = repository.supabaseService.publishStream(
+                                    username = user.username,
+                                    isLive = true,
+                                    torchOn = dev.torchOn,
+                                    lensFacingFront = dev.lensFacingFront,
+                                    sirenActive = dev.sirenActive,
+                                    nightVision = dev.nightVision,
+                                    batteryLevel = dev.batteryLevel,
+                                    frameBase64 = _latestFrameBase64.value,
+                                    recordingActive = _isRecording.value
+                                )
+                                repository.setCloudConnected(publishOk)
+                            }
+
+                            // Rapidly poll for remote commands from viewer (200ms response time)
                             val commands = repository.supabaseService.fetchPendingCommands(dev.id)
                             for (cmd in commands) {
                                 handleRemoteCommand(cmd.action)
@@ -385,12 +473,15 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                             }
 
                         } else if (deviceMode.value == DeviceMode.VIEWER_MONITOR) {
-                            // Viewer mode: fetch stream from camera user
+                            // Viewer mode: fetch stream metadata from camera user
                             val stream = repository.supabaseService.fetchStream(user.username)
                             if (stream != null) {
                                 repository.setCloudConnected(stream.isLive)
                                 _remoteStreamLive.value = stream.isLive
-                                _remoteFrameBase64.value = stream.frameBase64
+                                if (_liveStreamBitmap.value == null) {
+                                    // Fallback to cloud frame only if direct P2P UDP frame is not received yet
+                                    _remoteFrameBase64.value = stream.frameBase64
+                                }
 
                                 // Sync remote camera state to paired devices
                                 val updatedList = pairedDevices.value.map { d ->
@@ -435,7 +526,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                 } catch (e: Exception) {
                     Log.e("CctvViewModel", "Sync loop error", e)
                 }
-                delay(1500) // Poll/Sync interval
+                delay(100) // Poll/Sync interval
             }
         }
     }
@@ -542,5 +633,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         sirenPlayer.stopSiren()
         cameraManager.unbind()
         videoRecordingManager.unbind()
+        udpStreamManager.release()
+        hardwareEncoder.stop()
     }
 }

@@ -81,9 +81,10 @@ class SupabaseService {
 
     suspend fun signUpOrLogin(usernameInput: String, passwordInput: String): Result<SupabaseUser> = withContext(Dispatchers.IO) {
         try {
-            val cleanUsername = usernameInput.trim().lowercase()
+            val cleanUsername = usernameInput.trim().lowercase().replace(Regex("[^a-z0-9]"), "")
+            val finalUsername = if (cleanUsername.isBlank()) "user_${System.currentTimeMillis()}" else cleanUsername
+            val simulatedEmail = "$finalUsername@lovecctv.app"
             val cleanPassword = passwordInput.trim()
-            val simulatedEmail = "$cleanUsername@lovecctv.app"
 
             // Attempt Login via Supabase Auth
             val loginBody = JSONObject().apply {
@@ -185,7 +186,7 @@ class SupabaseService {
             val response = client.newCall(request).execute()
             response.isSuccessful
         } catch (e: Exception) {
-            Log.e("SupabaseService", "Failed to publish stream to Supabase", e)
+            Log.e("SupabaseService", "Failed to publish stream: ${e.message}")
             false
         }
     }
@@ -224,7 +225,7 @@ class SupabaseService {
             }
             null
         } catch (e: Exception) {
-            Log.e("SupabaseService", "Fetch stream error", e)
+            Log.e("SupabaseService", "Fetch stream error: ${e.message}")
             null
         }
     }
@@ -540,7 +541,7 @@ class SupabaseService {
             val response = client.newCall(request).execute()
             response.isSuccessful
         } catch (e: Exception) {
-            Log.e("SupabaseService", "Create paired device error", e)
+            Log.e("SupabaseService", "Create paired device error: ${e.message}")
             false
         }
     }

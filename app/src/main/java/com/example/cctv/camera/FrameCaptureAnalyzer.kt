@@ -23,8 +23,10 @@ import java.io.ByteArrayOutputStream
  */
 class FrameCaptureAnalyzer(
     private val onFrameCaptured: (String) -> Unit,
-    private val intervalMs: Long = 1500L,
-    private val jpegQuality: Int = 35
+    private val onCompressedBytesCaptured: ((ByteArray) -> Unit)? = null,
+    private val onRawNv21Captured: ((ByteArray, Int, Int) -> Unit)? = null,
+    private val intervalMs: Long = 66L,
+    private val jpegQuality: Int = 42
 ) : ImageAnalysis.Analyzer {
 
     companion object {
@@ -49,7 +51,36 @@ class FrameCaptureAnalyzer(
                 return
             }
 
-            val bitmap = yuvToBitmap(image)
+            val yBuffer = image.planes[0].buffer
+            val uBuffer = image.planes[1].buffer
+            val vBuffer = image.planes[2].buffer
+
+            yBuffer.rewind()
+            uBuffer.rewind()
+            vBuffer.rewind()
+
+            val ySize = yBuffer.remaining()
+            val uSize = uBuffer.remaining()
+            val vSize = vBuffer.remaining()
+
+            val nv21 = ByteArray(ySize + uSize + vSize)
+            yBuffer.get(nv21, 0, ySize)
+            vBuffer.get(nv21, ySize, vSize)
+            uBuffer.get(nv21, ySize + vSize, uSize)
+
+            // 1. Dispatch raw NV21 frames to Hardware MediaCodec encoder
+            onRawNv21Captured?.invoke(nv21, image.width, image.height)
+
+            val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
+            val out = ByteArrayOutputStream()
+            yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), jpegQuality, out)
+            val imageBytes = out.toByteArray()
+
+            // 2. Dispatch lightweight compressed JPEG bytes directly over UDP transport (zero lag)
+            onCompressedBytesCaptured?.invoke(imageBytes)
+
+            // 3. Scale and encode base64 for fallback cloud streaming
+            val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
             if (bitmap != null) {
                 val scaled = scaleBitmap(bitmap)
                 val base64 = bitmapToBase64(scaled)
@@ -61,32 +92,6 @@ class FrameCaptureAnalyzer(
             Log.e(TAG, "Frame capture error", e)
         } finally {
             image.close()
-        }
-    }
-
-    private fun yuvToBitmap(image: ImageProxy): Bitmap? {
-        return try {
-            val yBuffer = image.planes[0].buffer
-            val uBuffer = image.planes[1].buffer
-            val vBuffer = image.planes[2].buffer
-
-            val ySize = yBuffer.remaining()
-            val uSize = uBuffer.remaining()
-            val vSize = vBuffer.remaining()
-
-            val nv21 = ByteArray(ySize + uSize + vSize)
-            yBuffer.get(nv21, 0, ySize)
-            vBuffer.get(nv21, ySize, vSize)
-            uBuffer.get(nv21, ySize + vSize, uSize)
-
-            val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
-            val out = ByteArrayOutputStream()
-            yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), jpegQuality, out)
-            val imageBytes = out.toByteArray()
-            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-        } catch (e: Exception) {
-            Log.e(TAG, "YUV to bitmap error", e)
-            null
         }
     }
 

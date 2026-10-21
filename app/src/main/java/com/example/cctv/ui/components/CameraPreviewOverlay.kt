@@ -37,7 +37,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -93,13 +95,22 @@ fun CameraPreviewOverlay(
         label = "pulseAlpha"
     )
 
+    var boundPreviewView by remember { mutableStateOf<PreviewView?>(null) }
+
+    // Re-bind camera ONLY when lens facing changes
+    LaunchedEffect(device.lensFacingFront) {
+        boundPreviewView?.let { pv ->
+            viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
             .testTag("camera_preview_container")
     ) {
-        // CameraX Surface View — uses VideoCapture-capable binding
+        // CameraX Surface View — binds once on factory creation
         AndroidView(
             factory = { ctx ->
                 PreviewView(ctx).apply {
@@ -108,10 +119,10 @@ fun CameraPreviewOverlay(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                     scaleType = PreviewView.ScaleType.FILL_CENTER
+                }.also { pv ->
+                    boundPreviewView = pv
+                    viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
                 }
-            },
-            update = { previewView ->
-                viewModel.bindCameraWithRecorder(context, lifecycleOwner, previewView)
             },
             modifier = Modifier.fillMaxSize()
         )

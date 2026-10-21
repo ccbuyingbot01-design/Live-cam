@@ -9,6 +9,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.DynamicRange
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCase
@@ -86,17 +87,6 @@ class VideoRecordingManager {
                     it.surfaceProvider = previewView.surfaceProvider
                 }
 
-                val recorder = Recorder.Builder()
-                    .setQualitySelector(
-                        QualitySelector.from(
-                            Quality.HIGHEST,
-                            FallbackStrategy.higherQualityOrLowerThan(Quality.SD)
-                        )
-                    )
-                    .build()
-
-                videoCapture = VideoCapture.withOutput(recorder)
-
                 val cameraSelector = if (useFrontLens) {
                     CameraSelector.DEFAULT_FRONT_CAMERA
                 } else {
@@ -105,19 +95,71 @@ class VideoRecordingManager {
 
                 provider.unbindAll()
 
-                val useCases = mutableListOf<UseCase>(preview, videoCapture!!)
+                val useCases = mutableListOf<UseCase>(preview)
+
+                // Safely inspect hardware encoder profiles to avoid "No supported EncoderProfiles" error
+                try {
+                    val cameraInfo = provider.getCameraInfo(cameraSelector)
+                    val videoCapabilities = Recorder.getVideoCapabilities(cameraInfo)
+                    val supportedQualities = videoCapabilities.getSupportedQualities(DynamicRange.SDR)
+
+                    if (supportedQualities.isNotEmpty()) {
+                        // Prioritize SD (480p) or LOWEST for 15 FPS low-power streaming (Vivo Y91i & emulators)
+                        val preferredQualities = listOf(Quality.SD, Quality.LOWEST, Quality.HD)
+                            .filter { supportedQualities.contains(it) }
+                            .ifEmpty { supportedQualities }
+
+                        val qualitySelector = QualitySelector.fromOrderedList(
+                            preferredQualities,
+                            FallbackStrategy.lowerQualityOrHigherThan(Quality.LOWEST)
+                        )
+
+                        val recorder = Recorder.Builder()
+                            .setQualitySelector(qualitySelector)
+                            .build()
+
+                        val capture = VideoCapture.withOutput(recorder)
+                        videoCapture = capture
+                        useCases.add(capture)
+                    } else {
+                        Log.w(TAG, "No supported video qualities found on this camera. VideoCapture omitted.")
+                        videoCapture = null
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "VideoCapture configuration skipped due to lack of encoder profile support: ${e.message}")
+                    videoCapture = null
+                }
+
                 if (frameAnalyzer != null) {
                     val imageAnalysis = ImageAnalysis.Builder()
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .setTargetResolution(android.util.Size(640, 360))
                         .build()
                     imageAnalysis.setAnalyzer(analysisExecutor, frameAnalyzer)
                     useCases.add(imageAnalysis)
                 }
 
-                provider.bindToLifecycle(lifecycleOwner, cameraSelector, *useCases.toTypedArray())
-
-                Log.d(TAG, "Camera + Recorder bound successfully (useCases=${useCases.size}).")
-                onReady?.invoke(true)
+                try {
+                    provider.bindToLifecycle(lifecycleOwner, cameraSelector, *useCases.toTypedArray())
+                    Log.d(TAG, "Camera use cases bound successfully (useCases=${useCases.size}).")
+                    onReady?.invoke(true)
+                } catch (bindEx: Exception) {
+                    // Fallback: If device cannot support concurrent Preview + VideoCapture + ImageAnalysis
+                    Log.w(TAG, "Failed binding with VideoCapture, falling back to Preview + ImageAnalysis", bindEx)
+                    provider.unbindAll()
+                    videoCapture = null
+                    val fallbackCases = mutableListOf<UseCase>(preview)
+                    if (frameAnalyzer != null) {
+                        val imageAnalysis = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .setTargetResolution(android.util.Size(640, 360))
+                            .build()
+                        imageAnalysis.setAnalyzer(analysisExecutor, frameAnalyzer)
+                        fallbackCases.add(imageAnalysis)
+                    }
+                    provider.bindToLifecycle(lifecycleOwner, cameraSelector, *fallbackCases.toTypedArray())
+                    onReady?.invoke(true)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to bind camera + recorder", e)
                 onReady?.invoke(false)
