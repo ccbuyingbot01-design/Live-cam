@@ -128,7 +128,6 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     // LiveKit Cloud WebRTC Ultra-Low Latency Engine
     val liveKitManager = LiveKitManager(getApplication())
     val remoteLiveKitTrack: StateFlow<io.livekit.android.room.track.VideoTrack?> = liveKitManager.remoteVideoTrack
-    val localLiveKitTrack: StateFlow<io.livekit.android.room.track.VideoTrack?> = liveKitManager.localVideoTrack
 
     // Latest captured frame for cloud streaming (camera side)
     private val _latestFrameBase64 = MutableStateFlow<String?>(null)
@@ -291,6 +290,9 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                     hardwareEncoder.encodeFrame(nv21)
                 }
             },
+            onBitmapCaptured = { bmp ->
+                liveKitManager.pushBitmapFrame(bmp)
+            },
             onHumanDetected = { results ->
                 _detectedHumans.value = results
             },
@@ -388,10 +390,37 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── Camera Controls ───────────────────────────────────────────────────────
 
-    fun toggleTorch() {
+    fun toggleTorch(context: Context? = null) {
         val newState = !currentDevice.value.torchOn
-        cameraManager.toggleTorch(newState)
+        val appCtx = context ?: getApplication()
         repository.updateTorch(newState)
+
+        // 1. Primary: toggle on active videoRecordingManager camera
+        var handled = videoRecordingManager.toggleTorch(newState, appCtx)
+
+        // 2. Secondary: cameraManager
+        if (!handled) {
+            cameraManager.toggleTorch(newState, appCtx)
+        }
+
+        // 3. Fallback: system CameraManager
+        try {
+            val sysCameraManager = appCtx.getSystemService(Context.CAMERA_SERVICE) as? android.hardware.camera2.CameraManager
+            val cameraId = sysCameraManager?.cameraIdList?.firstOrNull { id ->
+                val chars = sysCameraManager.getCameraCharacteristics(id)
+                chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            } ?: "0"
+            if (sysCameraManager != null) {
+                sysCameraManager.setTorchMode(cameraId, newState)
+            }
+        } catch (e: Exception) {
+            Log.d("CctvViewModel", "System CameraManager fallback error", e)
+        }
+    }
+
+    fun toggleCameraLens() {
+        val newLensIsFront = !currentDevice.value.lensFacingFront
+        repository.updateLensFacing(newLensIsFront)
     }
 
     fun switchCameraLens(
@@ -401,8 +430,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         val newLensIsFront = !currentDevice.value.lensFacingFront
         repository.updateLensFacing(newLensIsFront)
-        liveKitManager.switchCamera(newLensIsFront)
-        if (previewView != null && liveKitManager.localVideoTrack.value == null) {
+        if (previewView != null) {
             cameraManager.switchCameraLens(
                 context = context,
                 lifecycleOwner = lifecycleOwner,
@@ -431,13 +459,14 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         repository.toggleNightVision(newState)
     }
 
-    fun toggleSirenAlarm() {
+    fun toggleSirenAlarm(context: Context? = null) {
+        val appCtx = context ?: getApplication()
         if (_isSirenRinging.value) {
             sirenPlayer.stopSiren()
             _isSirenRinging.value = false
             repository.setSirenState(false)
         } else {
-            sirenPlayer.startSiren(viewModelScope)
+            sirenPlayer.startSiren(viewModelScope, appCtx)
             _isSirenRinging.value = true
             repository.setSirenState(true)
         }
@@ -632,7 +661,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                 videoRecordingManager.toggleTorch(newState, appCtx)
             }
             "turn_siren_on" -> {
-                sirenPlayer.startSiren(viewModelScope)
+                sirenPlayer.startSiren(viewModelScope, appCtx)
                 _isSirenRinging.value = true
                 repository.setSirenState(true)
             }
@@ -642,7 +671,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                 repository.setSirenState(false)
             }
             "toggle_siren" -> {
-                toggleSirenAlarm()
+                toggleSirenAlarm(appCtx)
             }
             "toggle_lens" -> {
                 val newFront = !currentDevice.value.lensFacingFront

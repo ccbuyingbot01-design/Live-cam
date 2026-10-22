@@ -328,7 +328,7 @@ fun CameraModeScreen(
                             label = "Torch",
                             isActive = currentDevice.torchOn,
                             activeColor = Color.Yellow,
-                            onClick = { viewModel.toggleTorch() },
+                            onClick = { viewModel.toggleTorch(context) },
                             testTag = "btn_torch_toggle"
                         )
 
@@ -338,14 +338,7 @@ fun CameraModeScreen(
                             label = if (currentDevice.lensFacingFront) "Front" else "Rear",
                             isActive = currentDevice.lensFacingFront,
                             activeColor = NeonCyanPrimary,
-                            onClick = {
-                                viewModel.switchCameraLens(
-                                    context = context,
-                                    lifecycleOwner = (context as? androidx.lifecycle.LifecycleOwner)
-                                        ?: return@ActionButton,
-                                    previewView = androidx.camera.view.PreviewView(context)
-                                )
-                            },
+                            onClick = { viewModel.toggleCameraLens() },
                             testTag = "btn_lens_switch"
                         )
 
@@ -355,7 +348,7 @@ fun CameraModeScreen(
                             label = "Siren",
                             isActive = isSirenActive,
                             activeColor = LoveAlertRed,
-                            onClick = { viewModel.toggleSirenAlarm() },
+                            onClick = { viewModel.toggleSirenAlarm(context) },
                             testTag = "btn_siren_alarm"
                         )
 

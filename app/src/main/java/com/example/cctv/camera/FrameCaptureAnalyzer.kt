@@ -19,6 +19,7 @@ class FrameCaptureAnalyzer(
     private val onFrameCaptured: (String) -> Unit,
     private val onCompressedBytesCaptured: ((ByteArray) -> Unit)? = null,
     private val onRawNv21Captured: ((ByteArray, Int, Int) -> Unit)? = null,
+    private val onBitmapCaptured: ((Bitmap) -> Unit)? = null,
     private val onHumanDetected: ((List<HumanDetectorAnalyzer.HumanDetectionResult>) -> Unit)? = null,
     private var intervalMs: Long = 100L,
     private var jpegQuality: Int = 30,
@@ -64,6 +65,8 @@ class FrameCaptureAnalyzer(
             } else {
                 sourceBitmap
             }
+
+            onBitmapCaptured?.invoke(bitmap)
 
             val out = ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)

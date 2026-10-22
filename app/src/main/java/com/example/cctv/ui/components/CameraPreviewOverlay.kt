@@ -95,15 +95,12 @@ fun CameraPreviewOverlay(
         label = "pulseAlpha"
     )
 
-    val localLiveKitTrack by viewModel.localLiveKitTrack.collectAsState()
     var boundPreviewView by remember { mutableStateOf<PreviewView?>(null) }
 
-    // Re-bind camera ONLY when lens facing changes
+    // Re-bind camera when lens facing changes
     LaunchedEffect(device.lensFacingFront) {
-        if (localLiveKitTrack != null) {
-            viewModel.liveKitManager.switchCamera(device.lensFacingFront)
-        } else {
-            boundPreviewView?.let { pv ->
+        boundPreviewView?.let { pv ->
+            pv.post {
                 viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
             }
         }
@@ -115,33 +112,25 @@ fun CameraPreviewOverlay(
             .background(Color.Black)
             .testTag("camera_preview_container")
     ) {
-        if (localLiveKitTrack != null) {
-            // LiveKit WebRTC Camera Viewfinder (Zero-conflict, instant 60 FPS hardware preview)
-            LiveKitVideoRenderer(
-                videoTrack = localLiveKitTrack,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            // CameraX Surface View fallback — binds once on factory creation with COMPATIBLE TextureView
-            AndroidView(
-                factory = { ctx ->
-                    PreviewView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        scaleType = PreviewView.ScaleType.FILL_CENTER
-                        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                    }.also { pv ->
-                        boundPreviewView = pv
-                        pv.post {
-                            viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
-                        }
+        // CameraX Viewfinder with COMPATIBLE TextureView to eliminate black screens
+        AndroidView(
+            factory = { ctx ->
+                PreviewView(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    scaleType = PreviewView.ScaleType.FILL_CENTER
+                    implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                }.also { pv ->
+                    boundPreviewView = pv
+                    pv.post {
+                        viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
                     }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        }
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
 
         // Green Night Vision Filter Shader
         if (device.nightVision) {

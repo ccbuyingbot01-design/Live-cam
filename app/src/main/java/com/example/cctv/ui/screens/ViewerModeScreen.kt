@@ -305,10 +305,12 @@ fun ViewerModeScreen(
 
                     if (liveKitVideoTrack != null || displayBitmap != null) {
                         if (liveKitVideoTrack != null) {
-                            com.example.cctv.ui.components.LiveKitVideoRenderer(
-                                videoTrack = liveKitVideoTrack,
-                                modifier = Modifier.fillMaxSize()
-                            )
+                            if (!isFullScreen) {
+                                com.example.cctv.ui.components.LiveKitVideoRenderer(
+                                    videoTrack = liveKitVideoTrack,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
                         } else if (displayBitmap != null) {
                             androidx.compose.foundation.Image(
                                 bitmap = displayBitmap.asImageBitmap(),
@@ -632,13 +634,20 @@ fun ViewerModeScreen(
                         } else null
                     }
 
-                    if (displayBitmap != null) {
-                        androidx.compose.foundation.Image(
-                            bitmap = displayBitmap.asImageBitmap(),
-                            contentDescription = "Full Size Live Stream",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Fit
-                        )
+                    if (liveKitVideoTrack != null || displayBitmap != null) {
+                        if (liveKitVideoTrack != null) {
+                            com.example.cctv.ui.components.LiveKitVideoRenderer(
+                                videoTrack = liveKitVideoTrack,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else if (displayBitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = displayBitmap.asImageBitmap(),
+                                contentDescription = "Full Size Live Stream",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
 
                         // Daily Activity Heatmap Visualization Overlay
                         MotionHeatmapOverlay(

@@ -65,31 +65,44 @@ class VideoRecordingManager {
     fun isReady(): Boolean = videoCapture != null && cameraProvider != null
 
     fun toggleTorch(enable: Boolean, context: Context): Boolean {
-        return try {
-            val cam = camera
-            if (cam != null && cam.cameraInfo.hasFlashUnit()) {
+        var torchActivated = false
+
+        // 1. Try active CameraX cameraControl
+        val cam = camera
+        if (cam != null) {
+            try {
                 cam.cameraControl.enableTorch(enable)
                 Log.d(TAG, "CameraX VideoCapture torch set to $enable")
-                true
-            } else {
-                val sysCameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? android.hardware.camera2.CameraManager
-                val cameraId = sysCameraManager?.cameraIdList?.firstOrNull { id ->
-                    val chars = sysCameraManager.getCameraCharacteristics(id)
-                    chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
-                }
-                if (sysCameraManager != null && cameraId != null) {
-                    sysCameraManager.setTorchMode(cameraId, enable)
-                    Log.d(TAG, "System CameraManager torch set to $enable on $cameraId")
-                    true
-                } else {
-                    Log.w(TAG, "No flash unit found on this device")
-                    false
+                torchActivated = true
+            } catch (e: Exception) {
+                Log.w(TAG, "CameraControl enableTorch threw exception: ${e.message}")
+            }
+        }
+
+        // 2. ALSO trigger system CameraManager for back camera flash hardware
+        try {
+            val sysCameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? android.hardware.camera2.CameraManager
+            if (sysCameraManager != null) {
+                for (id in sysCameraManager.cameraIdList) {
+                    try {
+                        val chars = sysCameraManager.getCameraCharacteristics(id)
+                        val hasFlash = chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                        val facing = chars.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING)
+                        if (hasFlash && (facing == android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK || sysCameraManager.cameraIdList.size == 1)) {
+                            sysCameraManager.setTorchMode(id, enable)
+                            Log.d(TAG, "System CameraManager torch set to $enable on $id")
+                            torchActivated = true
+                        }
+                    } catch (e: Exception) {
+                        // Some device HALs handle torch via cameraControl
+                    }
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to toggle torch in VideoRecordingManager", e)
-            false
         }
+
+        return torchActivated
     }
 
     // ── Camera Binding ────────────────────────────────────────────────────────
@@ -127,37 +140,30 @@ class VideoRecordingManager {
 
                 val useCases = mutableListOf<UseCase>(preview)
 
-                // Safely inspect hardware encoder profiles to avoid "No supported EncoderProfiles" error
+                // Build VideoCapture universally compatible with all Android devices (API 24+)
                 try {
-                    val cameraInfo = provider.getCameraInfo(cameraSelector)
-                    val videoCapabilities = Recorder.getVideoCapabilities(cameraInfo)
-                    val supportedQualities = videoCapabilities.getSupportedQualities(DynamicRange.SDR)
+                    val qualitySelector = QualitySelector.fromOrderedList(
+                        listOf(Quality.SD, Quality.HD, Quality.LOWEST),
+                        FallbackStrategy.lowerQualityOrHigherThan(Quality.LOWEST)
+                    )
+                    val recorder = Recorder.Builder()
+                        .setQualitySelector(qualitySelector)
+                        .build()
 
-                    if (supportedQualities.isNotEmpty()) {
-                        // Prioritize SD (480p) or LOWEST for 15 FPS low-power streaming (Vivo Y91i & emulators)
-                        val preferredQualities = listOf(Quality.SD, Quality.LOWEST, Quality.HD)
-                            .filter { supportedQualities.contains(it) }
-                            .ifEmpty { supportedQualities }
-
-                        val qualitySelector = QualitySelector.fromOrderedList(
-                            preferredQualities,
-                            FallbackStrategy.lowerQualityOrHigherThan(Quality.LOWEST)
-                        )
-
-                        val recorder = Recorder.Builder()
-                            .setQualitySelector(qualitySelector)
-                            .build()
-
+                    val capture = VideoCapture.withOutput(recorder)
+                    videoCapture = capture
+                    useCases.add(capture)
+                    Log.d(TAG, "VideoCapture built successfully.")
+                } catch (e: Exception) {
+                    Log.w(TAG, "QualitySelector failed, trying default Recorder.Builder(): ${e.message}")
+                    try {
+                        val recorder = Recorder.Builder().build()
                         val capture = VideoCapture.withOutput(recorder)
                         videoCapture = capture
                         useCases.add(capture)
-                    } else {
-                        Log.w(TAG, "No supported video qualities found on this camera. VideoCapture omitted.")
-                        videoCapture = null
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "VideoCapture unavailable on device: ${e2.message}")
                     }
-                } catch (e: Exception) {
-                    Log.w(TAG, "VideoCapture configuration skipped due to lack of encoder profile support: ${e.message}")
-                    videoCapture = null
                 }
 
                 if (frameAnalyzer != null) {
@@ -174,21 +180,23 @@ class VideoRecordingManager {
                     Log.d(TAG, "Camera use cases bound successfully (useCases=${useCases.size}).")
                     onReady?.invoke(true)
                 } catch (bindEx: Exception) {
-                    // Fallback: If device cannot support concurrent Preview + VideoCapture + ImageAnalysis
-                    Log.w(TAG, "Failed binding with VideoCapture, falling back to Preview + ImageAnalysis", bindEx)
+                    // Fallback for devices that cannot bind Preview + VideoCapture + ImageAnalysis concurrently (e.g. LEGACY/LIMITED devices)
+                    Log.w(TAG, "3 use-case bind failed, prioritizing Preview + VideoCapture", bindEx)
                     provider.unbindAll()
-                    videoCapture = null
                     val fallbackCases = mutableListOf<UseCase>(preview)
-                    if (frameAnalyzer != null) {
-                        val imageAnalysis = ImageAnalysis.Builder()
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .setTargetResolution(android.util.Size(640, 360))
-                            .build()
-                        imageAnalysis.setAnalyzer(analysisExecutor, frameAnalyzer)
-                        fallbackCases.add(imageAnalysis)
+                    if (videoCapture != null) {
+                        fallbackCases.add(videoCapture!!)
                     }
-                    camera = provider.bindToLifecycle(lifecycleOwner, cameraSelector, *fallbackCases.toTypedArray())
-                    onReady?.invoke(true)
+                    try {
+                        camera = provider.bindToLifecycle(lifecycleOwner, cameraSelector, *fallbackCases.toTypedArray())
+                        Log.d(TAG, "Fallback bound Preview + VideoCapture successfully.")
+                        onReady?.invoke(true)
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Fallback bind failed, binding Preview only", e2)
+                        provider.unbindAll()
+                        camera = provider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
+                        onReady?.invoke(true)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to bind camera + recorder", e)
