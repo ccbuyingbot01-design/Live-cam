@@ -145,6 +145,12 @@ fun CameraModeScreen(
         }
     }
 
+    // Auto-start LiveKit Cloud WebRTC sender on camera screen open
+    LaunchedEffect(supabaseUser?.username) {
+        val user = supabaseUser?.username ?: "camera"
+        viewModel.startLiveKitSender("lovecctv_$user")
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()

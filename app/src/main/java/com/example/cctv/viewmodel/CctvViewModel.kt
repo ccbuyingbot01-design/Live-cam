@@ -128,6 +128,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     // LiveKit Cloud WebRTC Ultra-Low Latency Engine
     val liveKitManager = LiveKitManager(getApplication())
     val remoteLiveKitTrack: StateFlow<io.livekit.android.room.track.VideoTrack?> = liveKitManager.remoteVideoTrack
+    val localLiveKitTrack: StateFlow<io.livekit.android.room.track.VideoTrack?> = liveKitManager.localVideoTrack
 
     // Latest captured frame for cloud streaming (camera side)
     private val _latestFrameBase64 = MutableStateFlow<String?>(null)
@@ -396,16 +397,19 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     fun switchCameraLens(
         context: Context,
         lifecycleOwner: LifecycleOwner,
-        previewView: PreviewView
+        previewView: PreviewView? = null
     ) {
         val newLensIsFront = !currentDevice.value.lensFacingFront
         repository.updateLensFacing(newLensIsFront)
-        cameraManager.switchCameraLens(
-            context = context,
-            lifecycleOwner = lifecycleOwner,
-            previewView = previewView,
-            motionAnalyzer = if (currentDevice.value.motionGuardEnabled) motionDetector else null
-        )
+        liveKitManager.switchCamera(newLensIsFront)
+        if (previewView != null && liveKitManager.localVideoTrack.value == null) {
+            cameraManager.switchCameraLens(
+                context = context,
+                lifecycleOwner = lifecycleOwner,
+                previewView = previewView,
+                motionAnalyzer = if (currentDevice.value.motionGuardEnabled) motionDetector else null
+            )
+        }
     }
 
     fun toggleMotionGuard(enabled: Boolean) {

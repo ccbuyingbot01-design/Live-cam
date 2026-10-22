@@ -7,6 +7,9 @@ import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
 import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
+import io.livekit.android.room.track.CameraPosition
+import io.livekit.android.room.track.LocalVideoTrack
+import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.VideoTrack
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +25,7 @@ import kotlinx.coroutines.sync.withLock
  * LiveKitManager
  *
  * Ultra-low latency (<300ms) WebRTC cloud streaming engine powered by LiveKit Cloud.
- * Features thread-safe connection locking, auto-reconnection listeners, and clean room state management.
+ * Manages local camera capture and remote video subscription with zero-buffer frame dropping.
  */
 class LiveKitManager(private val context: Context) {
 
@@ -45,6 +48,9 @@ class LiveKitManager(private val context: Context) {
     private val _isReconnecting = MutableStateFlow(false)
     val isReconnecting: StateFlow<Boolean> = _isReconnecting.asStateFlow()
 
+    private val _localVideoTrack = MutableStateFlow<VideoTrack?>(null)
+    val localVideoTrack: StateFlow<VideoTrack?> = _localVideoTrack.asStateFlow()
+
     private val _remoteVideoTrack = MutableStateFlow<VideoTrack?>(null)
     val remoteVideoTrack: StateFlow<VideoTrack?> = _remoteVideoTrack.asStateFlow()
 
@@ -65,6 +71,21 @@ class LiveKitManager(private val context: Context) {
     }
 
     /**
+     * Switches local camera position (Front / Back).
+     */
+    fun switchCamera(isFront: Boolean) {
+        try {
+            val pub = room.localParticipant.getTrackPublication(Track.Source.CAMERA)
+            val track = pub?.track as? LocalVideoTrack
+            val targetPosition = if (isFront) CameraPosition.FRONT else CameraPosition.BACK
+            track?.switchCamera(position = targetPosition)
+            Log.i(TAG, "Switched LiveKit camera to position: $targetPosition")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error switching camera", e)
+        }
+    }
+
+    /**
      * Connects to LiveKit Cloud as Camera Sender and publishes hardware-accelerated video & audio tracks.
      */
     suspend fun connectAsSender(
@@ -76,6 +97,8 @@ class LiveKitManager(private val context: Context) {
             if (isConnectedOrConnecting()) {
                 if (currentConnectedRoom == roomName && currentIsSender == true) {
                     Log.d(TAG, "Already connected/connecting as sender to room $roomName")
+                    val pub = room.localParticipant.getTrackPublication(Track.Source.CAMERA)
+                    _localVideoTrack.value = pub?.track as? VideoTrack
                     return true
                 }
                 Log.d(TAG, "Disconnecting previous session before connecting as sender...")
@@ -103,11 +126,16 @@ class LiveKitManager(private val context: Context) {
             localParticipant.setCameraEnabled(true)
             localParticipant.setMicrophoneEnabled(true)
 
-            Log.i(TAG, "Successfully published Camera & Mic tracks to LiveKit Cloud!")
+            // Extract the local camera video track for local viewfinder display
+            val pub = localParticipant.getTrackPublication(Track.Source.CAMERA)
+            _localVideoTrack.value = pub?.track as? VideoTrack
+
+            Log.i(TAG, "Successfully published Camera & Mic tracks to LiveKit Cloud! Local track=${_localVideoTrack.value != null}")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to connect LiveKit Sender", e)
             _isConnected.value = false
+            _localVideoTrack.value = null
             false
         }
     }
@@ -200,6 +228,12 @@ class LiveKitManager(private val context: Context) {
         if (!_isConnected.value) return
         try {
             room.localParticipant.setCameraEnabled(enabled)
+            if (enabled) {
+                val pub = room.localParticipant.getTrackPublication(Track.Source.CAMERA)
+                _localVideoTrack.value = pub?.track as? VideoTrack
+            } else {
+                _localVideoTrack.value = null
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error changing camera state", e)
         }
@@ -214,6 +248,7 @@ class LiveKitManager(private val context: Context) {
             room.disconnect()
             _isConnected.value = false
             _isReconnecting.value = false
+            _localVideoTrack.value = null
             _remoteVideoTrack.value = null
             currentConnectedRoom = null
             currentIsSender = null

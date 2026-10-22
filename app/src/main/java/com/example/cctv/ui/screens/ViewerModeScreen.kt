@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.Button
@@ -120,6 +121,13 @@ fun ViewerModeScreen(
 
     val scrollState = rememberScrollState()
     val timeFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
+    val supabaseUser by viewModel.supabaseUser.collectAsState()
+
+    // Auto-start LiveKit Cloud WebRTC viewer on screen load
+    LaunchedEffect(supabaseUser?.username) {
+        val user = supabaseUser?.username ?: "camera"
+        viewModel.startLiveKitViewer("lovecctv_$user")
+    }
 
     Box(modifier = modifier.fillMaxSize().testTag("viewer_mode_screen")) {
         Column(
