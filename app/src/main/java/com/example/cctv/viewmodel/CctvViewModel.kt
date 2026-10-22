@@ -1,13 +1,18 @@
 package com.example.cctv.viewmodel
 
 import android.app.Application
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.BatteryManager
+import android.os.PowerManager
 import android.util.Log
+import com.example.cctv.service.AiBatteryOptimizer
+import com.example.cctv.service.BatteryReport
+import com.example.cctv.service.StreamingPerformanceProfile
 import com.example.cctv.webrtc.LiveKitManager
 import androidx.camera.view.PreviewView
 import androidx.lifecycle.AndroidViewModel
@@ -63,6 +68,13 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     val sessionManager = SessionManager(application)
     val udpStreamManager = UdpStreamManager()
     val hardwareEncoder = HardwareMediaCodecEncoder(width = 640, height = 480, frameRate = 10)
+    val aiBatteryOptimizer = AiBatteryOptimizer(application)
+
+    private val _batteryReport = MutableStateFlow<BatteryReport?>(null)
+    val batteryReport: StateFlow<BatteryReport?> = _batteryReport.asStateFlow()
+
+    private var activeFrameAnalyzer: FrameCaptureAnalyzer? = null
+    private var batteryReceiver: BroadcastReceiver? = null
 
     val deviceMode = repository.deviceMode
     val currentDevice = repository.currentDevice
@@ -232,6 +244,38 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun getRememberedMode(): DeviceMode? {
+        val saved = SessionManager.getSavedModeSync(getApplication()) ?: return null
+        return try {
+            DeviceMode.valueOf(saved)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun getRememberChoice(): Boolean {
+        return SessionManager.getRememberChoiceSync(getApplication())
+    }
+
+    fun setDeviceModeAndRemember(mode: DeviceMode, remember: Boolean) {
+        setDeviceMode(mode)
+        SessionManager.saveModeSync(getApplication(), mode.name, remember)
+        viewModelScope.launch {
+            sessionManager.saveDeviceMode(mode.name, remember)
+            val username = _supabaseUser.value?.username
+            val deviceId = currentDevice.value.id
+            if (!username.isNullOrBlank()) {
+                supabaseService.saveDevicePreference(
+                    deviceId = deviceId,
+                    username = username,
+                    selectedMode = mode.name,
+                    rememberChoice = remember,
+                    autoStartOnBoot = (mode == DeviceMode.CAMERA_SENDER)
+                )
+            }
+        }
+    }
+
     fun bindCameraToPreview(
         context: Context,
         lifecycleOwner: LifecycleOwner,
@@ -274,7 +318,11 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
      * streams lightweight compressed frames directly peer-to-peer over UDP.
      */
     private fun createFrameAnalyzer(): FrameCaptureAnalyzer {
-        return FrameCaptureAnalyzer(
+        val initialProfile = aiBatteryOptimizer.getStreamingProfile(
+            isLowPower = currentDevice.value.isLowPowerMode,
+            hasRecentMotion = false
+        )
+        val analyzer = FrameCaptureAnalyzer(
             onFrameCaptured = { base64 ->
                 _latestFrameBase64.value = base64
             },
@@ -296,9 +344,22 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
             onHumanDetected = { results ->
                 _detectedHumans.value = results
             },
-            intervalMs = 100L,
-            jpegQuality = 30,
-            maxDimension = 320
+            intervalMs = (1000L / initialProfile.targetFps).coerceAtLeast(33L),
+            jpegQuality = initialProfile.jpegQuality,
+            maxDimension = initialProfile.maxDimension
+        )
+        activeFrameAnalyzer = analyzer
+        return analyzer
+    }
+
+    fun applyAdaptiveStreamingProfile() {
+        val dev = currentDevice.value
+        val hasRecentMotion = (System.currentTimeMillis() - dev.lastMotionTime) < 15000L
+        val profile = aiBatteryOptimizer.getStreamingProfile(dev.isLowPowerMode, hasRecentMotion)
+        activeFrameAnalyzer?.updatePerformanceProfile(
+            targetFps = profile.targetFps,
+            targetQuality = profile.jpegQuality,
+            targetMaxDim = profile.maxDimension
         )
     }
 
@@ -547,7 +608,8 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                             }
 
                             // Publish fast lightweight metadata to Supabase (isLive, torch, siren, battery)
-                            if (now - lastCloudPublishTime >= 1500L) {
+                            val syncInterval = if (dev.isLowPowerMode) 3500L else 1500L
+                            if (now - lastCloudPublishTime >= syncInterval) {
                                 lastCloudPublishTime = now
                                 val publishOk = repository.supabaseService.publishStream(
                                     username = user.username,
@@ -728,31 +790,95 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ── Battery Monitoring ────────────────────────────────────────────────────
+    // ── AI Smart Battery Monitoring ──────────────────────────────────────────
 
     private fun monitorBatteryState() {
         try {
-            val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-            val batteryStatus: Intent? = getApplication<Application>().registerReceiver(null, filter)
-
-            batteryStatus?.let { intent ->
-                val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-                val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-                val batteryPct = if (level >= 0 && scale > 0) (level * 100 / scale.toFloat()).toInt() else 85
-
-                val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
-                val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
-                        status == BatteryManager.BATTERY_STATUS_FULL
-
-                repository.updateBatteryStatus(batteryPct, isCharging)
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_BATTERY_CHANGED)
+                addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
             }
+
+            batteryReceiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    if (intent.action == Intent.ACTION_BATTERY_CHANGED) {
+                        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                        val batteryPct = if (level >= 0 && scale > 0) (level * 100 / scale.toFloat()).toInt() else 85
+
+                        val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+                        val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                                status == BatteryManager.BATTERY_STATUS_FULL
+
+                        val tempRaw = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 280)
+                        val tempCelsius = tempRaw / 10.0f
+                        val voltageMv = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 3850)
+
+                        handleBatteryUpdate(batteryPct, isCharging, tempCelsius, voltageMv)
+                    }
+                }
+            }
+
+            getApplication<Application>().registerReceiver(batteryReceiver, filter)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("CctvViewModel", "Error monitoring battery state", e)
         }
+    }
+
+    private fun handleBatteryUpdate(level: Int, charging: Boolean, tempCelsius: Float, voltageMv: Int) {
+        val prevLowPower = currentDevice.value.isLowPowerMode
+        repository.updateBatteryStatus(level, charging, tempCelsius)
+        val dev = currentDevice.value
+
+        val report = aiBatteryOptimizer.computeReport(
+            batteryPct = level,
+            isCharging = charging,
+            smartSaverEnabled = dev.smartBatterySaverEnabled,
+            lowPowerThreshold = dev.lowPowerThreshold,
+            hasRecentMotion = (System.currentTimeMillis() - dev.lastMotionTime) < 15000L,
+            tempCelsius = tempCelsius,
+            voltageMv = voltageMv
+        )
+        _batteryReport.value = report
+
+        if (dev.isLowPowerMode != prevLowPower) {
+            Log.i("CctvViewModel", "AI Power Mode Transition: isLowPower=${dev.isLowPowerMode} (battery: $level%)")
+            applyAdaptiveStreamingProfile()
+            if (dev.isLowPowerMode && dev.torchOn) {
+                toggleTorch() // Auto-shutoff torch on low battery to prevent thermal stress and rapid drain
+            }
+        }
+    }
+
+    fun toggleSmartBatterySaver(enabled: Boolean) {
+        repository.updateSmartBatterySaver(enabled, currentDevice.value.lowPowerThreshold)
+        applyAdaptiveStreamingProfile()
+    }
+
+    fun setLowPowerThreshold(threshold: Int) {
+        repository.updateSmartBatterySaver(currentDevice.value.smartBatterySaverEnabled, threshold)
+        applyAdaptiveStreamingProfile()
+    }
+
+    fun toggleManualLowPowerMode() {
+        val newLowPower = !currentDevice.value.isLowPowerMode
+        repository.setLowPowerModeManually(newLowPower)
+        applyAdaptiveStreamingProfile()
+    }
+
+    fun isBatteryOptimizationIgnored(context: Context): Boolean {
+        return com.example.cctv.service.CctvForegroundService.isBatteryOptimizationIgnored(context)
+    }
+
+    fun requestIgnoreBatteryOptimization(context: Context) {
+        com.example.cctv.service.CctvForegroundService.requestIgnoreBatteryOptimization(context)
     }
 
     override fun onCleared() {
         super.onCleared()
+        try {
+            batteryReceiver?.let { getApplication<Application>().unregisterReceiver(it) }
+        } catch (_: Exception) {}
         sirenPlayer.stopSiren()
         cameraManager.unbind()
         videoRecordingManager.unbind()

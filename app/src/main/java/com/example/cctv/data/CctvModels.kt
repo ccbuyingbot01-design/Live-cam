@@ -37,7 +37,11 @@ data class CctvDevice(
     // Remote-controllable recording state (set by viewer, obeyed by camera)
     val isRecording: Boolean = false,
     val notificationVibration: Boolean = true,
-    val notificationSound: Boolean = true
+    val notificationSound: Boolean = true,
+    val isLowPowerMode: Boolean = false,
+    val smartBatterySaverEnabled: Boolean = true,
+    val lowPowerThreshold: Int = 40,
+    val batteryTempCelsius: Float = 28f
 )
 
 @Keep

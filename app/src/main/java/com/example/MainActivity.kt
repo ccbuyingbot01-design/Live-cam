@@ -147,7 +147,13 @@ fun LoveCctvApp(
 
     androidx.compose.runtime.LaunchedEffect(supabaseUser) {
         if (supabaseUser != null && currentDestination == AppDestination.AUTH) {
-            currentDestination = AppDestination.ROLE_CHOICE
+            val rememberedMode = viewModel.getRememberedMode()
+            if (rememberedMode != null) {
+                viewModel.setDeviceMode(rememberedMode)
+                currentDestination = AppDestination.SURVEILLANCE_MAIN
+            } else {
+                currentDestination = AppDestination.ROLE_CHOICE
+            }
         }
     }
 
@@ -256,7 +262,7 @@ fun LoveCctvApp(
                 ) {
                     NavigationBarItem(
                         selected = deviceMode == DeviceMode.CAMERA_SENDER,
-                        onClick = { viewModel.setDeviceMode(DeviceMode.CAMERA_SENDER) },
+                        onClick = { viewModel.setDeviceModeAndRemember(DeviceMode.CAMERA_SENDER, viewModel.getRememberChoice()) },
                         icon = { Icon(Icons.Default.Videocam, contentDescription = "Live Cam") },
                         label = { Text("Live Cam") },
                         colors = NavigationBarItemDefaults.colors(
@@ -271,7 +277,7 @@ fun LoveCctvApp(
 
                     NavigationBarItem(
                         selected = deviceMode == DeviceMode.VIEWER_MONITOR,
-                        onClick = { viewModel.setDeviceMode(DeviceMode.VIEWER_MONITOR) },
+                        onClick = { viewModel.setDeviceModeAndRemember(DeviceMode.VIEWER_MONITOR, viewModel.getRememberChoice()) },
                         icon = { Icon(Icons.Default.Monitor, contentDescription = "View Cam") },
                         label = { Text("View Cam") },
                         colors = NavigationBarItemDefaults.colors(
@@ -304,8 +310,9 @@ fun LoveCctvApp(
                     supabaseUser?.let { user ->
                         RoleChoiceScreen(
                             user = user,
-                            onSelectRole = { selectedMode ->
-                                viewModel.setDeviceMode(selectedMode)
+                            initialRememberChoice = viewModel.getRememberChoice(),
+                            onSelectRole = { selectedMode, rememberChoice ->
+                                viewModel.setDeviceModeAndRemember(selectedMode, rememberChoice)
                                 currentDestination = AppDestination.SURVEILLANCE_MAIN
                             }
                         )

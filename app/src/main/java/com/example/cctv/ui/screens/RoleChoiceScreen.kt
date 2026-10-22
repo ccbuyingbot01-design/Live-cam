@@ -21,12 +21,19 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Monitor
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,9 +56,12 @@ import com.example.ui.theme.TextSecondary
 @Composable
 fun RoleChoiceScreen(
     user: SupabaseUser,
-    onSelectRole: (DeviceMode) -> Unit,
+    initialRememberChoice: Boolean = true,
+    onSelectRole: (DeviceMode, Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var rememberChoice by remember { mutableStateOf(initialRememberChoice) }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -104,7 +114,76 @@ fun RoleChoiceScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // Device Memory & Reboot Auto-Start Switch Card
+        Card(
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            shape = RoundedCornerShape(16.dp),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                if (rememberChoice) NeonCyanPrimary.copy(alpha = 0.6f) else DarkBorder
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("remember_device_choice_card")
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(if (rememberChoice) NeonCyanPrimary.copy(alpha = 0.2f) else DarkSurfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PhoneAndroid,
+                        contentDescription = "Device Persistence",
+                        tint = if (rememberChoice) NeonCyanPrimary else TextSecondary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Remember choice on this phone",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = if (rememberChoice)
+                            "Auto-open on startup & resume on phone reboot"
+                        else
+                            "Ask every time app opens",
+                        color = if (rememberChoice) NeonCyanPrimary else TextSecondary,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp
+                    )
+                }
+
+                Switch(
+                    checked = rememberChoice,
+                    onCheckedChange = { rememberChoice = it },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.Black,
+                        checkedTrackColor = NeonCyanPrimary,
+                        uncheckedThumbColor = TextSecondary,
+                        uncheckedTrackColor = DarkSurfaceVariant
+                    ),
+                    modifier = Modifier.testTag("remember_device_mode_switch")
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
 
         Text(
             text = "SELECT FEATURE FOR THIS PHONE",
@@ -114,27 +193,27 @@ fun RoleChoiceScreen(
             letterSpacing = 1.2.sp
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Option 1: Live Cam (Camera Sender Phone)
         RoleOptionCard(
             icon = Icons.Default.Videocam,
             badgeColor = LoveAlertRed,
             title = "LIVE CAM (CAMERA PHONE)",
-            description = "Mount this phone in your house/room. It will start camera recording & broadcast live video to Supabase over Wi-Fi/4G/5G.",
-            onClick = { onSelectRole(DeviceMode.CAMERA_SENDER) },
+            description = "Mount this phone in your room/house. Auto-starts camera recording & streams live video in foreground service with screen locked.",
+            onClick = { onSelectRole(DeviceMode.CAMERA_SENDER, rememberChoice) },
             testTag = "select_live_cam_btn"
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Option 2: View Cam (Viewer Monitor Phone)
         RoleOptionCard(
             icon = Icons.Default.Monitor,
             badgeColor = NeonCyanPrimary,
             title = "VIEW CAM (VIEWER MONITOR)",
-            description = "Use this phone anywhere on Earth to watch live camera recording from your Live Cam phone in real-time.",
-            onClick = { onSelectRole(DeviceMode.VIEWER_MONITOR) },
+            description = "Use this phone anywhere on Earth to watch live video and control your Live Cam phone in real-time.",
+            onClick = { onSelectRole(DeviceMode.VIEWER_MONITOR, rememberChoice) },
             testTag = "select_view_cam_btn"
         )
     }

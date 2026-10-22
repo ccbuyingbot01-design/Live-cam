@@ -32,26 +32,37 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -96,8 +107,10 @@ fun CameraModeScreen(
     val isRecording by viewModel.isRecording.collectAsState()
     val recordingMessage by viewModel.recordingMessage.collectAsState()
     val supabaseUser by viewModel.supabaseUser.collectAsState()
+    val batteryReport by viewModel.batteryReport.collectAsState()
     var showQrDialog by remember { mutableStateOf(false) }
     var showQrScanner by remember { mutableStateOf(false) }
+    var showBatteryDialog by remember { mutableStateOf(false) }
     var isServiceRunning by remember { mutableStateOf(CctvForegroundService.isServiceRunning) }
 
     // ── Storage permission launcher ────────────────────────────────────
@@ -244,7 +257,48 @@ fun CameraModeScreen(
                         isGuardActive = currentDevice.motionGuardEnabled
                     )
 
-                    // Background Service Persistence Banner
+                    // AI Low Power Mode Live Streaming Alert Banner
+                    AnimatedVisibility(visible = currentDevice.isLowPowerMode) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(LoveAlertRed.copy(alpha = 0.2f))
+                                .border(1.dp, LoveAlertRed, RoundedCornerShape(12.dp))
+                                .clickable { showBatteryDialog = true }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Bolt,
+                                contentDescription = "AI Eco Saver",
+                                tint = LoveAlertRed,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "AI ECO SAVER ACTIVE (<40% BATTERY)",
+                                    color = LoveAlertRed,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "5 FPS • 240p low-power stream • Tap to view diagnostics",
+                                    color = Color.White,
+                                    fontSize = 10.sp
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Info",
+                                tint = LoveAlertRed,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
+                    // Background Service & Battery Telemetry Banner
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -254,24 +308,46 @@ fun CameraModeScreen(
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = if (currentDevice.isCharging) Icons.Default.BatteryChargingFull else Icons.Default.BatteryFull,
-                            contentDescription = "Battery",
-                            tint = if (currentDevice.batteryLevel > 20) SecurityGreen else LoveAlertRed,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Battery ${currentDevice.batteryLevel}%",
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { showBatteryDialog = true }
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                .testTag("battery_diagnostics_btn"),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (currentDevice.isCharging) Icons.Default.BatteryChargingFull else Icons.Default.BatteryFull,
+                                contentDescription = "Battery",
+                                tint = when {
+                                    currentDevice.isCharging -> SecurityGreen
+                                    currentDevice.isLowPowerMode -> LoveAlertRed
+                                    currentDevice.batteryLevel > 20 -> SecurityGreen
+                                    else -> LoveAlertRed
+                                },
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text(
+                                    text = "Battery ${currentDevice.batteryLevel}%" + if (currentDevice.isCharging) " (⚡)" else "",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (currentDevice.isLowPowerMode) "AI Eco 5 FPS" else "Normal 15 FPS",
+                                    color = if (currentDevice.isLowPowerMode) LoveAlertRed else NeonCyanPrimary,
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
 
                         Spacer(modifier = Modifier.weight(1f))
 
                         Text(
-                            text = "BG Service",
+                            text = "BG Guard",
                             color = TextSecondary,
                             fontSize = 11.sp,
                             modifier = Modifier.padding(end = 6.dp)
@@ -404,6 +480,323 @@ fun CameraModeScreen(
                 }
             )
         }
+
+        // AI Battery Optimization Diagnostics Dialog Modal
+        if (showBatteryDialog) {
+            AiBatteryDiagnosticsDialog(
+                device = currentDevice,
+                batteryReport = batteryReport,
+                onDismiss = { showBatteryDialog = false },
+                onToggleSaver = { viewModel.toggleSmartBatterySaver(it) },
+                onToggleManualLowPower = { viewModel.toggleManualLowPowerMode() },
+                onIgnoreBatteryOptimization = { viewModel.requestIgnoreBatteryOptimization(context) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun AiBatteryDiagnosticsDialog(
+    device: com.example.cctv.data.CctvDevice,
+    batteryReport: com.example.cctv.service.BatteryReport?,
+    onDismiss: () -> Unit,
+    onToggleSaver: (Boolean) -> Unit,
+    onToggleManualLowPower: () -> Unit,
+    onIgnoreBatteryOptimization: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            shape = RoundedCornerShape(20.dp),
+            border = androidx.compose.foundation.BorderStroke(1.5.dp, if (device.isLowPowerMode) LoveAlertRed else NeonCyanPrimary),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .padding(vertical = 20.dp)
+                .testTag("ai_battery_diagnostics_dialog")
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(if (device.isLowPowerMode) LoveAlertRed.copy(alpha = 0.2f) else NeonCyanPrimary.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Bolt,
+                            contentDescription = "Battery AI",
+                            tint = if (device.isLowPowerMode) LoveAlertRed else NeonCyanPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "AI SMART BATTERY SAVER",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp
+                        )
+                        Text(
+                            text = if (device.isLowPowerMode) "LOW POWER STREAMING ACTIVE (<40%)" else "ACTIVE INTELLIGENT MONITORING",
+                            color = if (device.isLowPowerMode) LoveAlertRed else SecurityGreen,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Battery Progress Bar Card
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Battery Level: ${device.batteryLevel}%",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (device.isCharging) "⚡ Charging (AC/USB)" else "Discharging",
+                                color = if (device.isCharging) SecurityGreen else TextSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        LinearProgressIndicator(
+                            progress = { (device.batteryLevel / 100f).coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = when {
+                                device.isCharging -> SecurityGreen
+                                device.isLowPowerMode -> LoveAlertRed
+                                device.batteryLevel > 20 -> NeonCyanPrimary
+                                else -> LoveAlertRed
+                            },
+                            trackColor = Color.Black.copy(alpha = 0.5f)
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Temp: ${device.batteryTempCelsius}°C",
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "Est. Runtime: ~${String.format("%.1f", batteryReport?.estimatedHoursRemaining ?: 4f)}h",
+                                color = NeonCyanPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Streaming Power State Telemetry Grid
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DarkSurfaceVariant)
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TelemetryRow(
+                        label = "Streaming Target",
+                        value = if (device.isLowPowerMode) "5 FPS @ 240p (Low-Power)" else "15 FPS @ 320p (Normal)",
+                        isHighlighted = device.isLowPowerMode
+                    )
+                    TelemetryRow(
+                        label = "PowerManager WakeLock",
+                        value = "ACTIVE (Prevents Screen Lock Sleep)",
+                        isHighlighted = true
+                    )
+                    TelemetryRow(
+                        label = "WifiLock Radio",
+                        value = "ACTIVE (Zero-Throttle Mode)",
+                        isHighlighted = true
+                    )
+                    TelemetryRow(
+                        label = "Auto Low-Power Trigger",
+                        value = "Activates when battery < ${device.lowPowerThreshold}%",
+                        isHighlighted = false
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // AI Insight Callout
+                batteryReport?.aiInsight?.let { insight ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF071927))
+                            .border(1.dp, NeonCyanPrimary.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                            .padding(10.dp)
+                    ) {
+                        Text(
+                            text = insight,
+                            color = NeonCyanPrimary,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Toggle: AI Smart Battery Saver (<40% auto trigger)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "AI Smart Battery Saver",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Auto-switches to 5 FPS @ 240p when under 40%",
+                            color = TextSecondary,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Switch(
+                        checked = device.smartBatterySaverEnabled,
+                        onCheckedChange = onToggleSaver,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.Black,
+                            checkedTrackColor = NeonCyanPrimary
+                        )
+                    )
+                }
+
+                // Toggle: Manual Low Power Mode
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Force Low Power Streaming",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Forces 5 FPS low-power mode regardless of battery %",
+                            color = TextSecondary,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Switch(
+                        checked = device.isLowPowerMode,
+                        onCheckedChange = { onToggleManualLowPower() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.Black,
+                            checkedTrackColor = LoveAlertRed
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Whitelist Battery Optimization Button
+                Button(
+                    onClick = onIgnoreBatteryOptimization,
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyanPrimary.copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Shield,
+                        contentDescription = "Battery Whitelist",
+                        tint = NeonCyanPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Whitelist App from Battery Optimization",
+                        color = NeonCyanPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TelemetryRow(
+    label: String,
+    value: String,
+    isHighlighted: Boolean
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            color = TextSecondary,
+            fontSize = 11.sp
+        )
+        Text(
+            text = value,
+            color = if (isHighlighted) SecurityGreen else Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.Monospace
+        )
     }
 }
 

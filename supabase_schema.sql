@@ -194,7 +194,32 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.cctv_motion_alerts;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.cctv_viewer_inbox;
 
 -- ────────────────────────────────────────────────────────────
--- 9. SAMPLE SEED DATA (optional – remove before production)
+-- 9. DEVICE PREFERENCES & REBOOT RECOVERY
+--    Stores whether this phone is configured as Live Cam or
+--    View Cam with auto-open on startup & reboot auto-start.
+-- ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.cctv_device_preferences (
+    device_id          TEXT        PRIMARY KEY,
+    username           TEXT        NOT NULL,
+    selected_mode      TEXT        NOT NULL DEFAULT 'CAMERA_SENDER', -- 'CAMERA_SENDER' or 'VIEWER_MONITOR'
+    remember_choice    BOOLEAN     NOT NULL DEFAULT TRUE,
+    auto_start_on_boot BOOLEAN     NOT NULL DEFAULT TRUE,
+    device_model       TEXT,
+    updated_at         BIGINT      NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+);
+
+CREATE INDEX IF NOT EXISTS idx_device_prefs_user ON public.cctv_device_preferences (username);
+
+ALTER TABLE public.cctv_device_preferences ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "allow_all_device_preferences" ON public.cctv_device_preferences
+    FOR ALL USING (TRUE) WITH CHECK (TRUE);
+
+-- Realtime publication
+ALTER PUBLICATION supabase_realtime ADD TABLE public.cctv_device_preferences;
+
+-- ────────────────────────────────────────────────────────────
+-- 10. SAMPLE SEED DATA (optional – remove before production)
 -- ────────────────────────────────────────────────────────────
 INSERT INTO public.cctv_streams (username, is_live, battery_level)
 VALUES ('demo_user', FALSE, 100)
@@ -203,9 +228,11 @@ ON CONFLICT (username) DO NOTHING;
 -- ────────────────────────────────────────────────────────────
 -- DONE.
 -- Tables created:
---   cctv_streams        – live camera status (polling + realtime)
---   cctv_motion_alerts  – full motion incident log with snapshots
---   cctv_fcm_tokens     – FCM push notification tokens
---   cctv_commands       – viewer → camera remote command queue
---   cctv_viewer_inbox   – unread alert inbox for viewer phone
+--   cctv_device_preferences – remembers phone role (Live Cam / View Cam)
+--   cctv_streams            – live camera status (polling + realtime)
+--   cctv_motion_alerts      – full motion incident log with snapshots
+--   cctv_fcm_tokens         – FCM push notification tokens
+--   cctv_commands           – viewer → camera remote command queue
+--   cctv_viewer_inbox       – unread alert inbox for viewer phone
+--   cctv_paired_devices     – paired cameras and viewers
 -- ────────────────────────────────────────────────────────────

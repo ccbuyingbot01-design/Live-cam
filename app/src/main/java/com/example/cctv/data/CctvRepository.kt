@@ -103,10 +103,38 @@ class CctvRepository {
         launchSyncToCloud()
     }
 
-    fun updateBatteryStatus(level: Int, charging: Boolean) {
-        _currentDevice.value = _currentDevice.value.copy(
+    fun updateBatteryStatus(level: Int, charging: Boolean, tempCelsius: Float = 28f) {
+        val current = _currentDevice.value
+        val shouldLowPower = if (current.smartBatterySaverEnabled && !charging) {
+            level <= current.lowPowerThreshold
+        } else if (charging) {
+            false
+        } else {
+            current.isLowPowerMode
+        }
+        _currentDevice.value = current.copy(
             batteryLevel = level.coerceIn(0, 100),
-            isCharging = charging
+            isCharging = charging,
+            batteryTempCelsius = tempCelsius,
+            isLowPowerMode = shouldLowPower
+        )
+    }
+
+    fun setLowPowerModeManually(isLowPower: Boolean) {
+        _currentDevice.value = _currentDevice.value.copy(isLowPowerMode = isLowPower)
+    }
+
+    fun updateSmartBatterySaver(enabled: Boolean, threshold: Int = 40) {
+        val current = _currentDevice.value
+        val shouldLowPower = if (enabled && !current.isCharging) {
+            current.batteryLevel <= threshold
+        } else {
+            false
+        }
+        _currentDevice.value = current.copy(
+            smartBatterySaverEnabled = enabled,
+            lowPowerThreshold = threshold,
+            isLowPowerMode = shouldLowPower
         )
     }
 

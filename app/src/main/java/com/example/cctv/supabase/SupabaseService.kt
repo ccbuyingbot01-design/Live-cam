@@ -53,6 +53,16 @@ data class RemoteCommand(
     val timestamp: Long
 )
 
+data class DevicePreference(
+    val deviceId: String,
+    val username: String,
+    val selectedMode: String,
+    val rememberChoice: Boolean,
+    val autoStartOnBoot: Boolean,
+    val deviceModel: String,
+    val updatedAt: Long
+)
+
 class SupabaseService {
 
     private val client = OkHttpClient.Builder()
@@ -626,6 +636,77 @@ class SupabaseService {
         } catch (e: Exception) {
             Log.e("SupabaseService", "Clear paired devices error: ${e.message}")
             false
+        }
+    }
+
+    // ── Device Mode & Auto-Start Preferences (Persisted to Cloud DB) ────────
+
+    suspend fun saveDevicePreference(
+        deviceId: String,
+        username: String,
+        selectedMode: String,
+        rememberChoice: Boolean = true,
+        autoStartOnBoot: Boolean = true,
+        deviceModel: String = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().apply {
+                put("device_id", deviceId)
+                put("username", username)
+                put("selected_mode", selectedMode)
+                put("remember_choice", rememberChoice)
+                put("auto_start_on_boot", autoStartOnBoot)
+                put("device_model", deviceModel)
+                put("updated_at", System.currentTimeMillis())
+            }.toString().toRequestBody(jsonMediaType)
+
+            val request = Request.Builder()
+                .url("$baseUrl/rest/v1/cctv_device_preferences?on_conflict=device_id")
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .header("Content-Type", "application/json")
+                .header("Prefer", "resolution=merge-duplicates,return=minimal")
+                .post(body)
+                .build()
+
+            val response = client.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "saveDevicePreference error: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun fetchDevicePreference(deviceId: String): DevicePreference? = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("$baseUrl/rest/v1/cctv_device_preferences?device_id=eq.$deviceId&select=*")
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: ""
+            if (response.isSuccessful && body.startsWith("[")) {
+                val array = JSONArray(body)
+                if (array.length() > 0) {
+                    val obj = array.getJSONObject(0)
+                    return@withContext DevicePreference(
+                        deviceId = obj.optString("device_id", deviceId),
+                        username = obj.optString("username", ""),
+                        selectedMode = obj.optString("selected_mode", "CAMERA_SENDER"),
+                        rememberChoice = obj.optBoolean("remember_choice", true),
+                        autoStartOnBoot = obj.optBoolean("auto_start_on_boot", true),
+                        deviceModel = obj.optString("device_model", ""),
+                        updatedAt = obj.optLong("updated_at", System.currentTimeMillis())
+                    )
+                }
+            }
+            null
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "fetchDevicePreference error: ${e.message}")
+            null
         }
     }
 }
