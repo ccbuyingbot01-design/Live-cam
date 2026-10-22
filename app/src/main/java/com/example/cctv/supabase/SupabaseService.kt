@@ -155,7 +155,7 @@ class SupabaseService {
         sirenActive: Boolean,
         nightVision: Boolean,
         batteryLevel: Int,
-        frameBase64: String?,
+        frameBase64: String? = null,
         recordingActive: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
         try {

@@ -181,7 +181,7 @@ class CctvRepository {
 
     fun setUsername(user: String) {
         username = user
-        // Register this device in Supabase
+        // Register this device in Supabase and reset stream controls to OFF state
         val dev = _currentDevice.value
         CoroutineScope(Dispatchers.IO).launch {
             supabaseService.createPairedDevice(
@@ -190,7 +190,18 @@ class CctvRepository {
                 deviceName = dev.name,
                 ipAddress = dev.ipAddress
             )
-            Log.d("CctvRepository", "Device registered for user: $user")
+            // Reset remote stream controls on new session start
+            supabaseService.publishStream(
+                username = user,
+                isLive = true,
+                torchOn = false,
+                lensFacingFront = false,
+                sirenActive = false,
+                nightVision = false,
+                batteryLevel = dev.batteryLevel,
+                recordingActive = false
+            )
+            Log.d("CctvRepository", "Device registered and stream reset for user: $user")
             // Fetch existing paired devices for this user
             refreshPairedDevices()
         }

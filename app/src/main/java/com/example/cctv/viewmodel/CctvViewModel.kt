@@ -8,6 +8,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.BatteryManager
 import android.util.Log
+import com.example.cctv.webrtc.LiveKitManager
 import androidx.camera.view.PreviewView
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LifecycleOwner
@@ -123,6 +124,10 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isHardwareEncoding = MutableStateFlow(true)
     val isHardwareEncoding: StateFlow<Boolean> = _isHardwareEncoding.asStateFlow()
+
+    // LiveKit Cloud WebRTC Ultra-Low Latency Engine
+    val liveKitManager = LiveKitManager(getApplication())
+    val remoteLiveKitTrack: StateFlow<io.livekit.android.room.track.VideoTrack?> = liveKitManager.remoteVideoTrack
 
     // Latest captured frame for cloud streaming (camera side)
     private val _latestFrameBase64 = MutableStateFlow<String?>(null)
@@ -286,6 +291,18 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateLatestFrame(base64: String) {
         _latestFrameBase64.value = base64
+    }
+
+    fun startLiveKitSender(wsUrl: String = com.example.cctv.webrtc.LiveKitManager.DEFAULT_LIVEKIT_URL, token: String) {
+        viewModelScope.launch {
+            liveKitManager.connectAsSender(wsUrl, token)
+        }
+    }
+
+    fun startLiveKitViewer(wsUrl: String = com.example.cctv.webrtc.LiveKitManager.DEFAULT_LIVEKIT_URL, token: String) {
+        viewModelScope.launch {
+            liveKitManager.connectAsViewer(wsUrl, token, viewModelScope)
+        }
     }
 
     fun clearPairedDevicesForUser(username: String) {

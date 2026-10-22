@@ -106,6 +106,7 @@ fun ViewerModeScreen(
 
     // Direct UDP / Hardware-accelerated live stream frame (zero-latency buffer clearing)
     val liveStreamBitmap by viewModel.liveStreamBitmap.collectAsState()
+    val liveKitVideoTrack by viewModel.remoteLiveKitTrack.collectAsState()
     val detectedHumans by viewModel.detectedHumans.collectAsState()
     val dailyMotionPoints by viewModel.dailyMotionPoints.collectAsState()
     var showHeatmap by remember { mutableStateOf(true) }
