@@ -61,7 +61,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     val videoRecordingManager = VideoRecordingManager()
     val sessionManager = SessionManager(application)
     val udpStreamManager = UdpStreamManager()
-    val hardwareEncoder = HardwareMediaCodecEncoder(width = 640, height = 480, frameRate = 15)
+    val hardwareEncoder = HardwareMediaCodecEncoder(width = 640, height = 480, frameRate = 10)
 
     val deviceMode = repository.deviceMode
     val currentDevice = repository.currentDevice
@@ -79,6 +79,8 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     private val _recentMotionAlert = MutableStateFlow<MotionEvent?>(null)
     val recentMotionAlert: StateFlow<MotionEvent?> = _recentMotionAlert.asStateFlow()
 
+    val dailyMotionPoints: StateFlow<List<com.example.cctv.data.MotionPoint>> = repository.dailyMotionPoints
+
     // ── Video Recording State ──────────────────────────────────────────────
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
@@ -95,6 +97,18 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     // Triggered when a remote viewer sends a start-recording command
     private val _pendingAutoRecord = MutableStateFlow(false)
     val pendingAutoRecord: StateFlow<Boolean> = _pendingAutoRecord.asStateFlow()
+
+    fun consumePendingAutoRecord() {
+        _pendingAutoRecord.value = false
+    }
+
+    // ── AI Human Detection Results ──────────────────────────────────────────
+    private val _detectedHumans = MutableStateFlow<List<com.example.cctv.camera.HumanDetectorAnalyzer.HumanDetectionResult>>(emptyList())
+    val detectedHumans: StateFlow<List<com.example.cctv.camera.HumanDetectorAnalyzer.HumanDetectionResult>> = _detectedHumans.asStateFlow()
+
+    fun updateDetectedHumans(results: List<com.example.cctv.camera.HumanDetectorAnalyzer.HumanDetectionResult>) {
+        _detectedHumans.value = results
+    }
 
     // ── Remote Stream Frame for Viewer ─────────────────────────────────────
     private val _remoteFrameBase64 = MutableStateFlow<String?>(null)
@@ -118,8 +132,8 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
     private val motionDetector = MotionDetector(
         sensitivity = currentDevice.value.motionSensitivity,
-        onMotionDetected = { intensity, snapshot ->
-            onLocalMotionDetected(intensity, snapshot)
+        onMotionDetected = { intensity, snapshot, x, y ->
+            onLocalMotionDetected(intensity, snapshot, x, y)
         }
     )
 
@@ -247,7 +261,6 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                 _latestFrameBase64.value = base64
             },
             onCompressedBytesCaptured = { bytes ->
-                // Direct UDP transport broadcast: instant delivery, zero lag, no database bottleneck
                 udpStreamManager.sendFrame(bytes, "255.255.255.255", UdpStreamManager.DEFAULT_PORT)
                 val devIp = currentDevice.value.ipAddress
                 if (devIp.isNotBlank() && devIp != "0.0.0.0") {
@@ -259,15 +272,23 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                     hardwareEncoder.encodeFrame(nv21)
                 }
             },
-            intervalMs = 66L, // Strictly 15 FPS
-            jpegQuality = 42 // 480p lightweight stream
+            onHumanDetected = { results ->
+                _detectedHumans.value = results
+            },
+            intervalMs = 100L,
+            jpegQuality = 30,
+            maxDimension = 320
         )
     }
 
-    /** Called to update the frame for cloud streaming. */
     fun updateLatestFrame(base64: String) {
         _latestFrameBase64.value = base64
     }
+
+    fun clearPairedDevicesForUser(username: String) {
+        repository.clearPairedDevicesForUser(username)
+    }
+
 
     // ── Video Recording Control ───────────────────────────────────────────────
 
@@ -469,24 +490,10 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                             }
 
                             // Rapidly poll for remote commands from viewer (200ms response time)
-                            val commands = repository.supabaseService.fetchPendingCommands(dev.id)
+                            val commands = repository.supabaseService.fetchPendingCommands(user.username, dev.id)
                             for (cmd in commands) {
                                 handleRemoteCommand(cmd.action)
                                 repository.supabaseService.markCommandConsumed(cmd.id)
-                            }
-
-                            // Also check if viewer set recording_active via stream
-                            val stream = repository.supabaseService.fetchStream(user.username)
-                            if (stream != null) {
-                                val remoteWantsRecording = stream.recordingActive
-                                val currentlyRecording = _isRecording.value
-                                if (remoteWantsRecording && !currentlyRecording) {
-                                    repository.setRecordingState(true)
-                                    _pendingAutoRecord.value = true
-                                } else if (!remoteWantsRecording && currentlyRecording) {
-                                    stopVideoRecording()
-                                    repository.setRecordingState(false)
-                                }
                             }
 
                         } else if (deviceMode.value == DeviceMode.VIEWER_MONITOR) {
@@ -552,13 +559,18 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
      * Handle incoming remote commands on the camera side.
      */
     private fun handleRemoteCommand(action: String) {
+        Log.d("CctvViewModel", "Handling remote command: $action")
+        val appCtx = getApplication<Application>()
         when (action) {
             "toggle_torch" -> {
                 val newState = !currentDevice.value.torchOn
-                cameraManager.toggleTorch(newState)
                 repository.updateTorch(newState)
+                Log.d("CctvViewModel", "Toggling torch to: $newState")
+                cameraManager.toggleTorch(newState, appCtx)
+                videoRecordingManager.toggleTorch(newState, appCtx)
             }
             "toggle_siren" -> {
+                Log.d("CctvViewModel", "Toggling siren")
                 toggleSirenAlarm()
             }
             "toggle_lens" -> {
@@ -567,6 +579,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
             }
             "toggle_night_vision" -> {
                 val newState = !currentDevice.value.nightVision
+                Log.d("CctvViewModel", "Toggling night vision to: $newState")
                 repository.toggleNightVision(newState)
             }
             "start_recording" -> {
@@ -582,9 +595,9 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── Motion Detection ──────────────────────────────────────────────────────
 
-    private fun onLocalMotionDetected(intensity: Float, snapshot: Bitmap?) {
+    private fun onLocalMotionDetected(intensity: Float, snapshot: Bitmap?, xRatio: Float = 0.5f, yRatio: Float = 0.5f) {
         viewModelScope.launch {
-            repository.logMotionEvent(intensity, snapshot)
+            repository.logMotionEvent(intensity, snapshot, xRatio, yRatio)
             val latest = repository.motionEvents.value.firstOrNull()
             _recentMotionAlert.value = latest
 
@@ -762,6 +775,8 @@ class UdpStreamManager {
 
                     if (timestamp > lastTs) {
                         latestReceivedTimestamp.set(timestamp)
+                        // EXPLICIT BUFFER CLEARING: Discard any previous bitmap data immediately
+                        latestLiveFrame.set(null)
                         assemblingFrames.keys.filter { it < frameId }.forEach {
                             assemblingFrames.remove(it)
                         }

@@ -114,6 +114,14 @@ class CctvRepository {
         _isCloudConnected.value = connected
     }
 
+    fun updateNotificationPrefs(vibration: Boolean, sound: Boolean) {
+        _currentDevice.value = _currentDevice.value.copy(
+            notificationVibration = vibration,
+            notificationSound = sound
+        )
+        launchSyncToCloud()
+    }
+
     // ── Remote Control via Cloud ───────────────────────────────────────────
 
     fun remoteToggleTorch(deviceId: String) {
@@ -217,6 +225,13 @@ class CctvRepository {
         return true
     }
 
+    fun clearPairedDevicesForUser(username: String) {
+        CoroutineScope(Dispatchers.IO).launch {
+            supabaseService.clearAllPairedDevices(username)
+            refreshPairedDevices()
+        }
+    }
+
     suspend fun refreshPairedDevices() {
         val user = username ?: return
         val devices = supabaseService.listDevicesForUser(user)
@@ -230,9 +245,12 @@ class CctvRepository {
         }
     }
 
-    // ── Motion Events ─────────────────────────────────────────────────────
+    // ── Motion Events & Heatmap ───────────────────────────────────────────
 
-    fun logMotionEvent(intensity: Float, snapshot: Bitmap?) {
+    private val _dailyMotionPoints = MutableStateFlow<List<MotionPoint>>(emptyList())
+    val dailyMotionPoints: StateFlow<List<MotionPoint>> = _dailyMotionPoints.asStateFlow()
+
+    fun logMotionEvent(intensity: Float, snapshot: Bitmap?, xRatio: Float = 0.5f, yRatio: Float = 0.5f) {
         val severity = when {
             intensity > 0.8f -> MotionSeverity.CRITICAL
             intensity > 0.5f -> MotionSeverity.HIGH
@@ -251,7 +269,9 @@ class CctvRepository {
             intensity = intensity,
             severity = severity,
             snapshotBase64 = base64,
-            description = "Motion detected (${(intensity * 100).toInt()}% activity) near camera lens."
+            description = "Motion detected (${(intensity * 100).toInt()}% activity) near camera lens.",
+            xRatio = xRatio,
+            yRatio = yRatio
         )
 
         _motionEvents.value = listOf(event) + _motionEvents.value
@@ -259,6 +279,10 @@ class CctvRepository {
             lastMotionTime = event.timestamp,
             lastMotionIntensity = intensity
         )
+
+        val newPoint = MotionPoint(x = xRatio, y = yRatio, intensity = intensity)
+        val cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+        _dailyMotionPoints.value = (_dailyMotionPoints.value.filter { it.timestamp > cutoff } + newPoint)
 
         // Upload motion event to Supabase
         CoroutineScope(Dispatchers.IO).launch {

@@ -116,14 +116,6 @@ fun CameraModeScreen(
         }
     }
 
-    // Show toast when recording finishes or errors
-    LaunchedEffect(recordingMessage) {
-        recordingMessage?.let { msg ->
-            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-            viewModel.dismissRecordingMessage()
-        }
-    }
-
     // Helper: check + request permissions before starting recording
     fun requestStorageAndRecord() {
         val needed = viewModel.videoRecordingManager.requiredPermissions().filter { perm ->
@@ -133,6 +125,23 @@ fun CameraModeScreen(
             viewModel.startVideoRecording(context)
         } else {
             permissionLauncher.launch(needed.toTypedArray())
+        }
+    }
+
+    // Observe pending auto-record command from viewer phone
+    val pendingAutoRecord by viewModel.pendingAutoRecord.collectAsState()
+    LaunchedEffect(pendingAutoRecord) {
+        if (pendingAutoRecord) {
+            viewModel.consumePendingAutoRecord()
+            requestStorageAndRecord()
+        }
+    }
+
+    // Show toast when recording finishes or errors
+    LaunchedEffect(recordingMessage) {
+        recordingMessage?.let { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            viewModel.dismissRecordingMessage()
         }
     }
 

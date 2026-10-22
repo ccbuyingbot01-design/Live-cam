@@ -35,7 +35,17 @@ data class CctvDevice(
     val ipAddress: String = "192.168.1.105",
     val fps: Int = 30,
     // Remote-controllable recording state (set by viewer, obeyed by camera)
-    val isRecording: Boolean = false
+    val isRecording: Boolean = false,
+    val notificationVibration: Boolean = true,
+    val notificationSound: Boolean = true
+)
+
+@Keep
+data class MotionPoint(
+    val x: Float, // Normalized 0.0f..1.0f
+    val y: Float, // Normalized 0.0f..1.0f
+    val intensity: Float,
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 @Keep
@@ -47,5 +57,7 @@ data class MotionEvent(
     val intensity: Float,
     val severity: MotionSeverity,
     val snapshotBase64: String? = null,
-    val description: String
+    val description: String,
+    val xRatio: Float = 0.5f,
+    val yRatio: Float = 0.5f
 )

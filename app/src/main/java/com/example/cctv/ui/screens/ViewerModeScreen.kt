@@ -3,7 +3,11 @@ package com.example.cctv.ui.screens
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -34,10 +38,12 @@ import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.Button
@@ -50,6 +56,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import com.example.cctv.ui.components.MotionHeatmapOverlay
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -99,6 +106,9 @@ fun ViewerModeScreen(
 
     // Direct UDP / Hardware-accelerated live stream frame (zero-latency buffer clearing)
     val liveStreamBitmap by viewModel.liveStreamBitmap.collectAsState()
+    val detectedHumans by viewModel.detectedHumans.collectAsState()
+    val dailyMotionPoints by viewModel.dailyMotionPoints.collectAsState()
+    var showHeatmap by remember { mutableStateOf(true) }
     var isFullScreen by remember { mutableStateOf(false) }
 
     // Cloud stream data
@@ -290,6 +300,13 @@ fun ViewerModeScreen(
                             contentScale = ContentScale.Crop
                         )
 
+                        // Daily Activity Heatmap Visualization Overlay
+                        MotionHeatmapOverlay(
+                            motionPoints = dailyMotionPoints,
+                            modifier = Modifier.fillMaxSize(),
+                            enabled = showHeatmap
+                        )
+
                         // Night vision overlay
                         if (activeCamera.nightVision) {
                             Box(
@@ -298,6 +315,45 @@ fun ViewerModeScreen(
                                     .background(NightVisionGreen.copy(alpha = 0.15f))
                             )
                         }
+
+                        // Heatmap Toggle & Fullscreen Buttons Row
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (showHeatmap) Color(0xFFFF1744).copy(alpha = 0.85f) else Color.Black.copy(alpha = 0.6f))
+                                    .clickable { showHeatmap = !showHeatmap }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = if (showHeatmap) "HEATMAP ON (${dailyMotionPoints.size})" else "HEATMAP OFF",
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { isFullScreen = true },
+                                modifier = Modifier
+                                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            ) {
+                                Icon(
+                                    Icons.Default.ScreenRotation,
+                                    contentDescription = "Rotate & Full Screen",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+
+
                     } else {
                         // No stream yet — show waiting placeholder
                         Box(
@@ -355,7 +411,7 @@ fun ViewerModeScreen(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = activeCamera.name.uppercase(),
+                                    text = "${activeCamera.name.uppercase()} • ${if (liveStreamBitmap != null) "HD" else "SD"}",
                                     color = Color.White,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
@@ -534,6 +590,40 @@ fun ViewerModeScreen(
                             contentScale = ContentScale.Fit
                         )
 
+                        // Daily Activity Heatmap Visualization Overlay
+                        MotionHeatmapOverlay(
+                            motionPoints = dailyMotionPoints,
+                            modifier = Modifier.fillMaxSize(),
+                            enabled = showHeatmap
+                        )
+
+                        // AI Green Human Bounding Boxes Overlay on Full Screen Live View
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            for (human in detectedHumans) {
+                                val left = human.boundingBox.left * size.width
+                                val top = human.boundingBox.top * size.height
+                                val right = human.boundingBox.right * size.width
+                                val bottom = human.boundingBox.bottom * size.height
+                                val rectWidth = right - left
+                                val rectHeight = bottom - top
+
+                                // Main Green AI Bounding Box
+                                drawRect(
+                                    color = NightVisionGreen,
+                                    topLeft = Offset(left, top),
+                                    size = androidx.compose.ui.geometry.Size(rectWidth, rectHeight),
+                                    style = Stroke(width = 3.dp.toPx())
+                                )
+
+                                // Fill translucent green
+                                drawRect(
+                                    color = NightVisionGreen.copy(alpha = 0.15f),
+                                    topLeft = Offset(left, top),
+                                    size = androidx.compose.ui.geometry.Size(rectWidth, rectHeight)
+                                )
+                            }
+                        }
+
                         if (activeCamera.nightVision) {
                             Box(
                                 modifier = Modifier
@@ -565,7 +655,7 @@ fun ViewerModeScreen(
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
                             Text(
-                                text = "${activeCamera.name.uppercase()} • 480p @ 15 FPS (ZERO DELAY)",
+                                text = "${activeCamera.name.uppercase()} • LIVE CCTV (FULL SCREEN)",
                                 color = NeonCyanPrimary,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,

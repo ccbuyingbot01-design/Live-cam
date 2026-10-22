@@ -11,7 +11,7 @@ import java.io.ByteArrayOutputStream
 
 class MotionDetector(
     private var sensitivity: Float = 0.4f,
-    private val onMotionDetected: (intensity: Float, snapshot: Bitmap?) -> Unit
+    private val onMotionDetected: (intensity: Float, snapshot: Bitmap?, xRatio: Float, yRatio: Float) -> Unit
 ) : ImageAnalysis.Analyzer {
 
     private var previousFrameY: ByteArray? = null
@@ -40,6 +40,10 @@ class MotionDetector(
                 val step = 16
                 var changedPixels = 0
                 var totalSampled = 0
+                var sumX = 0L
+                var sumY = 0L
+                val width = image.width
+                val height = image.height
                 val pixelThreshold = (30 * (1.1f - sensitivity)).toInt().coerceAtLeast(8)
 
                 var i = 0
@@ -48,6 +52,10 @@ class MotionDetector(
                     val prevVal = prev[i].toInt() and 0xFF
                     if (Math.abs(currVal - prevVal) > pixelThreshold) {
                         changedPixels++
+                        if (width > 0) {
+                            sumX += (i % width)
+                            sumY += (i / width)
+                        }
                     }
                     totalSampled++
                     i += step
@@ -64,7 +72,9 @@ class MotionDetector(
                         lastTriggerTime = now
                         val snapshotBitmap = convertYuvToBitmap(image)
                         val intensity = (motionRatio * 5f).coerceIn(0.1f, 1.0f)
-                        onMotionDetected(intensity, snapshotBitmap)
+                        val centerX = if (changedPixels > 0 && width > 0) (sumX.toFloat() / changedPixels) / width else 0.5f
+                        val centerY = if (changedPixels > 0 && height > 0) (sumY.toFloat() / changedPixels) / height else 0.5f
+                        onMotionDetected(intensity, snapshotBitmap, centerX, centerY)
                     }
                 }
             }

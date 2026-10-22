@@ -136,31 +136,65 @@ fun CameraPreviewOverlay(
             }
         }
 
-        // Surveillance Grid Reticle Overlay
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val stroke = Stroke(width = 1.5f)
-            val color = if (device.nightVision) NightVisionGreen.copy(alpha = 0.4f) else NeonCyanPrimary.copy(alpha = 0.35f)
+    val detectedHumans by viewModel.detectedHumans.collectAsState()
+    val dailyMotionPoints by viewModel.dailyMotionPoints.collectAsState()
 
-            // Corner reticles
-            val lineLength = 32.dp.toPx()
-            val padding = 24.dp.toPx()
+    // Daily Motion Activity Density Heatmap Layer
+    MotionHeatmapOverlay(
+        motionPoints = dailyMotionPoints,
+        modifier = Modifier.fillMaxSize()
+    )
 
-            // Top Left
-            drawLine(color, Offset(padding, padding), Offset(padding + lineLength, padding), strokeWidth = 3f)
-            drawLine(color, Offset(padding, padding), Offset(padding, padding + lineLength), strokeWidth = 3f)
+    // Surveillance Grid Reticle & AI Green Bounding Boxes Overlay
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val stroke = Stroke(width = 1.5f)
+        val reticleColor = if (device.nightVision) NightVisionGreen.copy(alpha = 0.4f) else NeonCyanPrimary.copy(alpha = 0.35f)
 
-            // Top Right
-            drawLine(color, Offset(size.width - padding, padding), Offset(size.width - padding - lineLength, padding), strokeWidth = 3f)
-            drawLine(color, Offset(size.width - padding, padding), Offset(size.width - padding, padding + lineLength), strokeWidth = 3f)
+        // Draw AI Green Human Bounding Boxes
+        for (human in detectedHumans) {
+            val left = human.boundingBox.left * size.width
+            val top = human.boundingBox.top * size.height
+            val right = human.boundingBox.right * size.width
+            val bottom = human.boundingBox.bottom * size.height
+            val rectWidth = right - left
+            val rectHeight = bottom - top
 
-            // Bottom Left
-            drawLine(color, Offset(padding, size.height - padding), Offset(padding + lineLength, size.height - padding), strokeWidth = 3f)
-            drawLine(color, Offset(padding, size.height - padding), Offset(padding, size.height - padding - lineLength), strokeWidth = 3f)
+            // Main Green Bounding Box
+            drawRect(
+                color = NightVisionGreen,
+                topLeft = Offset(left, top),
+                size = androidx.compose.ui.geometry.Size(rectWidth, rectHeight),
+                style = Stroke(width = 3.dp.toPx())
+            )
 
-            // Bottom Right
-            drawLine(color, Offset(size.width - padding, size.height - padding), Offset(size.width - padding - lineLength, size.height - padding), strokeWidth = 3f)
-            drawLine(color, Offset(size.width - padding, size.height - padding), Offset(size.width - padding, size.height - padding - lineLength), strokeWidth = 3f)
+            // Fill subtle green tint
+            drawRect(
+                color = NightVisionGreen.copy(alpha = 0.12f),
+                topLeft = Offset(left, top),
+                size = androidx.compose.ui.geometry.Size(rectWidth, rectHeight)
+            )
         }
+
+        // Corner reticles
+        val lineLength = 32.dp.toPx()
+        val padding = 24.dp.toPx()
+
+        // Top Left
+        drawLine(reticleColor, Offset(padding, padding), Offset(padding + lineLength, padding), strokeWidth = 3f)
+        drawLine(reticleColor, Offset(padding, padding), Offset(padding, padding + lineLength), strokeWidth = 3f)
+
+        // Top Right
+        drawLine(reticleColor, Offset(size.width - padding, padding), Offset(size.width - padding - lineLength, padding), strokeWidth = 3f)
+        drawLine(reticleColor, Offset(size.width - padding, padding), Offset(size.width - padding, padding + lineLength), strokeWidth = 3f)
+
+        // Bottom Left
+        drawLine(reticleColor, Offset(padding, size.height - padding), Offset(padding + lineLength, size.height - padding), strokeWidth = 3f)
+        drawLine(reticleColor, Offset(padding, size.height - padding), Offset(padding, size.height - padding - lineLength), strokeWidth = 3f)
+
+        // Bottom Right
+        drawLine(reticleColor, Offset(size.width - padding, size.height - padding), Offset(size.width - padding - lineLength, size.height - padding), strokeWidth = 3f)
+        drawLine(reticleColor, Offset(size.width - padding, size.height - padding), Offset(size.width - padding, size.height - padding - lineLength), strokeWidth = 3f)
+    }
 
         // Top HUD Status Bar
         Row(

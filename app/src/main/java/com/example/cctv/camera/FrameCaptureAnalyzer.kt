@@ -2,9 +2,7 @@ package com.example.cctv.camera
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.ImageFormat
-import android.graphics.Rect
-import android.graphics.YuvImage
+import android.graphics.Matrix
 import android.util.Base64
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
@@ -14,28 +12,39 @@ import java.io.ByteArrayOutputStream
 /**
  * FrameCaptureAnalyzer
  *
- * Periodically captures a camera frame, converts it to a small JPEG,
- * encodes as base64, and delivers it via [onFrameCaptured].
- * Used for cloud live streaming through Supabase.
- *
- * Default interval: 1500 ms (~0.7 FPS) — keeps bandwidth reasonable
- * while providing near-real-time CCTV surveillance.
+ * Periodically captures camera frames, converts them to small JPEG images,
+ * and delivers them via P2P UDP transport and Supabase cloud fallback.
  */
 class FrameCaptureAnalyzer(
     private val onFrameCaptured: (String) -> Unit,
     private val onCompressedBytesCaptured: ((ByteArray) -> Unit)? = null,
     private val onRawNv21Captured: ((ByteArray, Int, Int) -> Unit)? = null,
-    private val intervalMs: Long = 66L,
-    private val jpegQuality: Int = 42
+    private val onHumanDetected: ((List<HumanDetectorAnalyzer.HumanDetectionResult>) -> Unit)? = null,
+    private var intervalMs: Long = 100L,
+    private var jpegQuality: Int = 30,
+    private var maxDimension: Int = 320
 ) : ImageAnalysis.Analyzer {
 
     companion object {
         private const val TAG = "FrameCaptureAnalyzer"
-        // Scale down to this max dimension for bandwidth savings
-        private const val MAX_DIMENSION = 320
     }
 
     private var lastCaptureTime = 0L
+    private var lastHumanDetectTime = 0L
+
+    private val objectDetectorOptions = com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions.Builder()
+        .setDetectorMode(com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions.STREAM_MODE)
+        .enableMultipleObjects()
+        .enableClassification()
+        .build()
+
+    private val objectDetector = com.google.mlkit.vision.objects.ObjectDetection.getClient(objectDetectorOptions)
+
+    fun updatePerformanceProfile(targetFps: Int, targetQuality: Int, targetMaxDim: Int) {
+        intervalMs = (1000L / targetFps).coerceAtLeast(33L)
+        jpegQuality = targetQuality.coerceIn(10, 80)
+        maxDimension = targetMaxDim
+    }
 
     override fun analyze(image: ImageProxy) {
         try {
@@ -46,48 +55,70 @@ class FrameCaptureAnalyzer(
             }
             lastCaptureTime = now
 
-            if (image.format != ImageFormat.YUV_420_888) {
-                image.close()
-                return
+            val sourceBitmap = image.toBitmap()
+
+            val rotationDegrees = image.imageInfo.rotationDegrees
+            val bitmap = if (rotationDegrees != 0) {
+                val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+                Bitmap.createBitmap(sourceBitmap, 0, 0, sourceBitmap.width, sourceBitmap.height, matrix, true)
+            } else {
+                sourceBitmap
             }
 
-            val yBuffer = image.planes[0].buffer
-            val uBuffer = image.planes[1].buffer
-            val vBuffer = image.planes[2].buffer
-
-            yBuffer.rewind()
-            uBuffer.rewind()
-            vBuffer.rewind()
-
-            val ySize = yBuffer.remaining()
-            val uSize = uBuffer.remaining()
-            val vSize = vBuffer.remaining()
-
-            val nv21 = ByteArray(ySize + uSize + vSize)
-            yBuffer.get(nv21, 0, ySize)
-            vBuffer.get(nv21, ySize, vSize)
-            uBuffer.get(nv21, ySize + vSize, uSize)
-
-            // 1. Dispatch raw NV21 frames to Hardware MediaCodec encoder
-            onRawNv21Captured?.invoke(nv21, image.width, image.height)
-
-            val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
             val out = ByteArrayOutputStream()
-            yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), jpegQuality, out)
-            val imageBytes = out.toByteArray()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
+            val jpegBytes = out.toByteArray()
 
-            // 2. Dispatch lightweight compressed JPEG bytes directly over UDP transport (zero lag)
-            onCompressedBytesCaptured?.invoke(imageBytes)
+            onCompressedBytesCaptured?.invoke(jpegBytes)
 
-            // 3. Scale and encode base64 for fallback cloud streaming
-            val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-            if (bitmap != null) {
-                val scaled = scaleBitmap(bitmap)
-                val base64 = bitmapToBase64(scaled)
-                onFrameCaptured(base64)
-                if (scaled !== bitmap) scaled.recycle()
-                bitmap.recycle()
+            val scaled = scaleBitmap(bitmap, maxDimension)
+            val base64 = bitmapToBase64(scaled, jpegQuality)
+            onFrameCaptured(base64)
+
+            // AI Human Detection Processing
+            if (onHumanDetected != null && now - lastHumanDetectTime > 200L) {
+                lastHumanDetectTime = now
+                val inputImg = com.google.mlkit.vision.common.InputImage.fromBitmap(scaled, 0)
+                objectDetector.process(inputImg)
+                    .addOnSuccessListener { detectedObjects ->
+                        val results = mutableListOf<HumanDetectorAnalyzer.HumanDetectionResult>()
+                        val imgWidth = scaled.width.toFloat()
+                        val imgHeight = scaled.height.toFloat()
+
+                        for (obj in detectedObjects) {
+                            val box = obj.boundingBox
+                            val isPerson = obj.labels.any { l ->
+                                l.text.equals("Person", ignoreCase = true) || l.text.equals("Human", ignoreCase = true)
+                            } || obj.labels.isEmpty()
+
+                            if (isPerson && imgWidth > 0 && imgHeight > 0) {
+                                val normalizedBox = android.graphics.RectF(
+                                    (box.left.toFloat() / imgWidth).coerceIn(0f, 1f),
+                                    (box.top.toFloat() / imgHeight).coerceIn(0f, 1f),
+                                    (box.right.toFloat() / imgWidth).coerceIn(0f, 1f),
+                                    (box.bottom.toFloat() / imgHeight).coerceIn(0f, 1f)
+                                )
+                                val conf = obj.labels.maxByOrNull { it.confidence }?.confidence ?: 0.88f
+                                results.add(
+                                    HumanDetectorAnalyzer.HumanDetectionResult(
+                                        boundingBox = normalizedBox,
+                                        confidence = conf,
+                                        label = "HUMAN ${(conf * 100).toInt()}%"
+                                    )
+                                )
+                            }
+                        }
+                        onHumanDetected.invoke(results)
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e(TAG, "ML Kit detection error", e)
+                    }
             }
+
+            if (scaled !== bitmap && scaled !== sourceBitmap) scaled.recycle()
+            if (bitmap !== sourceBitmap) bitmap.recycle()
+            sourceBitmap.recycle()
+
         } catch (e: Exception) {
             Log.e(TAG, "Frame capture error", e)
         } finally {
@@ -95,20 +126,20 @@ class FrameCaptureAnalyzer(
         }
     }
 
-    private fun scaleBitmap(bitmap: Bitmap): Bitmap {
+    private fun scaleBitmap(bitmap: Bitmap, maxDim: Int): Bitmap {
         val width = bitmap.width
         val height = bitmap.height
-        if (width <= MAX_DIMENSION && height <= MAX_DIMENSION) return bitmap
+        if (width <= maxDim && height <= maxDim) return bitmap
 
-        val ratio = minOf(MAX_DIMENSION.toFloat() / width, MAX_DIMENSION.toFloat() / height)
+        val ratio = minOf(maxDim.toFloat() / width, maxDim.toFloat() / height)
         val newWidth = (width * ratio).toInt()
         val newHeight = (height * ratio).toInt()
         return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
     }
 
-    private fun bitmapToBase64(bitmap: Bitmap): String {
+    private fun bitmapToBase64(bitmap: Bitmap, quality: Int): String {
         val outputStream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, outputStream)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
         val byteArray = outputStream.toByteArray()
         return Base64.encodeToString(byteArray, Base64.NO_WRAP)
     }

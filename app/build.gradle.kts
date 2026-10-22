@@ -138,6 +138,8 @@ dependencies {
   androidTestImplementation(libs.androidx.runner)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
+
+  implementation(libs.mlkit.`object`.detection)
   // QR code generation (ZXing core – no Android UI dependency)
   implementation("com.google.zxing:core:3.5.3")
   // QR code scanning via CameraX (ML Kit barcode scanner)

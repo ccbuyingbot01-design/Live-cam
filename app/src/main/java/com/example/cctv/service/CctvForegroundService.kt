@@ -48,6 +48,7 @@ class CctvForegroundService : Service() {
     private fun startSurveillanceService() {
         isServiceRunning = true
         acquireWakeLock()
+        StorageCompressorService.startService(this)
 
         val notification = buildForegroundNotification("Surveillance Guard Active", "Broadcasting camera stream & monitoring motion...")
 
@@ -55,7 +56,7 @@ class CctvForegroundService : Service() {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
@@ -74,9 +75,11 @@ class CctvForegroundService : Service() {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = powerManager.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
-                "LoveCCTV::BackgroundSurveillanceLock"
+                "LoveCCTV::IndefiniteSurveillanceLock"
             ).apply {
-                acquire(12 * 60 * 60 * 1000L) // 12 hours timeout
+                // Acquire without a hard timeout, or with a very long one to prevent locking indefinitely
+                // This ensures the CPU stays on even if the app process is deprioritized
+                acquire(24 * 60 * 60 * 1000L) // 24 hours
             }
         }
     }

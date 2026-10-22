@@ -80,12 +80,31 @@ class CameraXManager {
         }, ContextCompat.getMainExecutor(context))
     }
 
-    fun toggleTorch(enable: Boolean) {
-        camera?.let {
-            if (it.cameraInfo.hasFlashUnit()) {
-                it.cameraControl.enableTorch(enable)
-                isTorchEnabled = enable
+    fun toggleTorch(enable: Boolean, context: Context? = null) {
+        val cam = camera
+        if (cam != null && cam.cameraInfo.hasFlashUnit()) {
+            Log.d("CameraXManager", "CameraX toggleTorch to: $enable")
+            cam.cameraControl.enableTorch(enable)
+            isTorchEnabled = enable
+        } else if (context != null) {
+            try {
+                val sysCameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? android.hardware.camera2.CameraManager
+                val cameraId = sysCameraManager?.cameraIdList?.firstOrNull { id ->
+                    val chars = sysCameraManager.getCameraCharacteristics(id)
+                    chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                }
+                if (sysCameraManager != null && cameraId != null) {
+                    sysCameraManager.setTorchMode(cameraId, enable)
+                    isTorchEnabled = enable
+                    Log.d("CameraXManager", "System CameraManager setTorchMode on $cameraId to $enable")
+                } else {
+                    Log.w("CameraXManager", "Flash unit not available on device")
+                }
+            } catch (e: Exception) {
+                Log.e("CameraXManager", "System setTorchMode error", e)
             }
+        } else {
+            Log.w("CameraXManager", "Camera instance is null and no context provided")
         }
     }
 

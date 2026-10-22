@@ -444,14 +444,15 @@ class SupabaseService {
     }
 
     /**
-     * Fetches unconsumed commands for a given device. Camera side polls this.
+     * Fetches unconsumed commands for a given username or device. Camera side polls this.
      */
-    suspend fun fetchPendingCommands(deviceId: String): List<RemoteCommand> = withContext(Dispatchers.IO) {
+    suspend fun fetchPendingCommands(username: String, deviceId: String = ""): List<RemoteCommand> = withContext(Dispatchers.IO) {
         try {
+            val filter = if (username.isNotBlank()) "username=eq.$username" else "device_id=eq.$deviceId"
             val request = Request.Builder()
                 .url(
                     "$baseUrl/rest/v1/cctv_commands" +
-                    "?device_id=eq.$deviceId" +
+                    "?$filter" +
                     "&consumed=eq.false" +
                     "&order=timestamp.asc" +
                     "&limit=20" +
@@ -610,6 +611,21 @@ class SupabaseService {
         } catch (e: Exception) {
             Log.e("SupabaseService", "List devices error", e)
             emptyList()
+        }
+    }
+    suspend fun clearAllPairedDevices(username: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("$baseUrl/rest/v1/cctv_paired_devices?username=eq.$username")
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .delete()
+                .build()
+            val response = client.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "Clear paired devices error: ${e.message}")
+            false
         }
     }
 }

@@ -48,6 +48,8 @@ class VideoRecordingManager {
     private var videoCapture: VideoCapture<Recorder>? = null
     private var activeRecording: Recording? = null
     private var cameraProvider: ProcessCameraProvider? = null
+    var camera: androidx.camera.core.Camera? = null
+        private set
     private val recordingExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val analysisExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
@@ -61,6 +63,34 @@ class VideoRecordingManager {
 
     /** Returns true when camera + recorder are bound and ready to record. */
     fun isReady(): Boolean = videoCapture != null && cameraProvider != null
+
+    fun toggleTorch(enable: Boolean, context: Context): Boolean {
+        return try {
+            val cam = camera
+            if (cam != null && cam.cameraInfo.hasFlashUnit()) {
+                cam.cameraControl.enableTorch(enable)
+                Log.d(TAG, "CameraX VideoCapture torch set to $enable")
+                true
+            } else {
+                val sysCameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? android.hardware.camera2.CameraManager
+                val cameraId = sysCameraManager?.cameraIdList?.firstOrNull { id ->
+                    val chars = sysCameraManager.getCameraCharacteristics(id)
+                    chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                }
+                if (sysCameraManager != null && cameraId != null) {
+                    sysCameraManager.setTorchMode(cameraId, enable)
+                    Log.d(TAG, "System CameraManager torch set to $enable on $cameraId")
+                    true
+                } else {
+                    Log.w(TAG, "No flash unit found on this device")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to toggle torch in VideoRecordingManager", e)
+            false
+        }
+    }
 
     // ── Camera Binding ────────────────────────────────────────────────────────
 
@@ -140,7 +170,7 @@ class VideoRecordingManager {
                 }
 
                 try {
-                    provider.bindToLifecycle(lifecycleOwner, cameraSelector, *useCases.toTypedArray())
+                    camera = provider.bindToLifecycle(lifecycleOwner, cameraSelector, *useCases.toTypedArray())
                     Log.d(TAG, "Camera use cases bound successfully (useCases=${useCases.size}).")
                     onReady?.invoke(true)
                 } catch (bindEx: Exception) {
@@ -157,7 +187,7 @@ class VideoRecordingManager {
                         imageAnalysis.setAnalyzer(analysisExecutor, frameAnalyzer)
                         fallbackCases.add(imageAnalysis)
                     }
-                    provider.bindToLifecycle(lifecycleOwner, cameraSelector, *fallbackCases.toTypedArray())
+                    camera = provider.bindToLifecycle(lifecycleOwner, cameraSelector, *fallbackCases.toTypedArray())
                     onReady?.invoke(true)
                 }
             } catch (e: Exception) {

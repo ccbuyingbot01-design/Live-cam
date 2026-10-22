@@ -58,7 +58,13 @@
             android:name="com.example.cctv.service.CctvForegroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="camera|microphone" />
+            android:foregroundServiceType="camera" />
+
+        <!-- Background Storage Watcher & Auto-Compressor Service -->
+        <service
+            android:name="com.example.cctv.service.StorageCompressorService"
+            android:enabled="true"
+            android:exported="false" />
 
         <activity
             android:name=".MainActivity"
