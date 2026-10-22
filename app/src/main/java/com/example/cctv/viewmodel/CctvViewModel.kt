@@ -293,15 +293,22 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         _latestFrameBase64.value = base64
     }
 
-    fun startLiveKitSender(wsUrl: String = com.example.cctv.webrtc.LiveKitManager.DEFAULT_LIVEKIT_URL, token: String) {
+    fun startLiveKitSender(roomName: String = "lovecctv_" + (_supabaseUser.value?.username ?: "camera")) {
         viewModelScope.launch {
-            liveKitManager.connectAsSender(wsUrl, token)
+            liveKitManager.connectAsSender(
+                roomName = roomName,
+                identity = "camera_" + currentDevice.value.id
+            )
         }
     }
 
-    fun startLiveKitViewer(wsUrl: String = com.example.cctv.webrtc.LiveKitManager.DEFAULT_LIVEKIT_URL, token: String) {
+    fun startLiveKitViewer(roomName: String = "lovecctv_" + (_supabaseUser.value?.username ?: "camera")) {
         viewModelScope.launch {
-            liveKitManager.connectAsViewer(wsUrl, token, viewModelScope)
+            liveKitManager.connectAsViewer(
+                roomName = roomName,
+                identity = "viewer_mobile_app",
+                scope = viewModelScope
+            )
         }
     }
 
