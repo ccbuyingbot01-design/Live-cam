@@ -203,16 +203,26 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             sessionManager.saveUsername(user.username)
         }
+        val room = "lovecctv_" + user.username
+        if (deviceMode.value == DeviceMode.VIEWER_MONITOR) {
+            startLiveKitViewer(room)
+        } else {
+            startLiveKitSender(room)
+        }
     }
 
     fun setDeviceMode(mode: DeviceMode) {
         repository.setDeviceMode(mode)
+        val user = _supabaseUser.value?.username ?: "camera"
+        val room = "lovecctv_$user"
         if (mode == DeviceMode.VIEWER_MONITOR) {
             udpStreamManager.stopSender()
             udpStreamManager.startReceiver()
+            startLiveKitViewer(room)
         } else {
             udpStreamManager.stopReceiver()
             udpStreamManager.startSender()
+            startLiveKitSender(room)
             if (_isHardwareEncoding.value) {
                 hardwareEncoder.start()
             }

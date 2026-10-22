@@ -109,7 +109,9 @@ fun ViewerModeScreen(
     val liveKitVideoTrack by viewModel.remoteLiveKitTrack.collectAsState()
     val detectedHumans by viewModel.detectedHumans.collectAsState()
     val dailyMotionPoints by viewModel.dailyMotionPoints.collectAsState()
+    val motionEvents by viewModel.motionEvents.collectAsState()
     var showHeatmap by remember { mutableStateOf(true) }
+    var isTimelineOpen by remember { mutableStateOf(false) }
     var isFullScreen by remember { mutableStateOf(false) }
 
     // Cloud stream data
@@ -119,15 +121,15 @@ fun ViewerModeScreen(
     val scrollState = rememberScrollState()
     val timeFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color(0xFF0B1021))
-            .padding(16.dp)
-            .verticalScroll(scrollState)
-            .testTag("viewer_mode_screen"),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
+    Box(modifier = modifier.fillMaxSize().testTag("viewer_mode_screen")) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0B1021))
+                .padding(16.dp)
+                .verticalScroll(scrollState),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
         // Top Paired Camera Selector Carousel
         Column {
             Row(
@@ -293,13 +295,20 @@ fun ViewerModeScreen(
                         } else null
                     }
 
-                    if (displayBitmap != null) {
-                        androidx.compose.foundation.Image(
-                            bitmap = displayBitmap.asImageBitmap(),
-                            contentDescription = "Live Camera Feed",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
+                    if (liveKitVideoTrack != null || displayBitmap != null) {
+                        if (liveKitVideoTrack != null) {
+                            com.example.cctv.ui.components.LiveKitVideoRenderer(
+                                videoTrack = liveKitVideoTrack,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else if (displayBitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = displayBitmap.asImageBitmap(),
+                                contentDescription = "Live Camera Feed",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
 
                         // Daily Activity Heatmap Visualization Overlay
                         MotionHeatmapOverlay(
@@ -309,7 +318,7 @@ fun ViewerModeScreen(
                         )
 
                         // Night vision overlay
-                        if (activeCamera.nightVision) {
+                        if (activeCamera?.nightVision == true) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -317,7 +326,7 @@ fun ViewerModeScreen(
                             )
                         }
 
-                        // Heatmap Toggle & Fullscreen Buttons Row
+                        // Heatmap & Motion Timeline & Fullscreen Buttons Row
                         Row(
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
@@ -325,6 +334,22 @@ fun ViewerModeScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isTimelineOpen) Color(0xFF00E5FF).copy(alpha = 0.85f) else Color.Black.copy(alpha = 0.6f))
+                                    .clickable { isTimelineOpen = !isTimelineOpen }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "TIMELINE (${motionEvents.size})",
+                                    color = if (isTimelineOpen) Color.Black else Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(12.dp))
@@ -353,8 +378,6 @@ fun ViewerModeScreen(
                                 )
                             }
                         }
-
-
                     } else {
                         // No stream yet — show waiting placeholder
                         Box(
@@ -678,5 +701,14 @@ fun ViewerModeScreen(
                 }
             }
         }
+    }
+
+    // Motion Timeline Animated Side Panel Overlay
+    com.example.cctv.ui.components.MotionTimelinePanel(
+        motionEvents = motionEvents,
+        isOpen = isTimelineOpen,
+        onClose = { isTimelineOpen = false },
+        modifier = Modifier.align(Alignment.CenterEnd)
+    )
     }
 }

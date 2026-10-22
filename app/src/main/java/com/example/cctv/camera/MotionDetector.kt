@@ -9,14 +9,21 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import java.io.ByteArrayOutputStream
 
+/**
+ * MotionDetector
+ *
+ * High-sensitivity YUV_420_888 image analyzer.
+ * Calculates frame-by-frame luminance delta, motion center-of-mass (X/Y ratios),
+ * and dynamic motion intensity gain so the visual sensor gauge responds smoothly.
+ */
 class MotionDetector(
-    private var sensitivity: Float = 0.4f,
+    private var sensitivity: Float = 0.5f,
     private val onMotionDetected: (intensity: Float, snapshot: Bitmap?, xRatio: Float, yRatio: Float) -> Unit
 ) : ImageAnalysis.Analyzer {
 
     private var previousFrameY: ByteArray? = null
-    private var lastTriggerTime = 0L
-    private val triggerCooldownMs = 2500L // 2.5 seconds cooldown between event logs
+    private var lastSnapshotTime = 0L
+    private val snapshotCooldownMs = 2000L // 2 seconds between image snapshot captures
 
     fun updateSensitivity(newSensitivity: Float) {
         sensitivity = newSensitivity.coerceIn(0.1f, 1.0f)
@@ -36,25 +43,30 @@ class MotionDetector(
 
             val prev = previousFrameY
             if (prev != null && prev.size == currentFrameY.size) {
-                // Downsample pixel comparison for high performance
-                val step = 16
+                // High-density sampling (step = 4 for high sensitivity)
+                val step = 4
                 var changedPixels = 0
                 var totalSampled = 0
                 var sumX = 0L
                 var sumY = 0L
                 val width = image.width
                 val height = image.height
-                val pixelThreshold = (30 * (1.1f - sensitivity)).toInt().coerceAtLeast(8)
+
+                // Adaptive luminance pixel threshold based on sensitivity
+                val pixelThreshold = (22 * (1.1f - sensitivity)).toInt().coerceAtLeast(6)
 
                 var i = 0
                 while (i < currentFrameY.size) {
                     val currVal = currentFrameY[i].toInt() and 0xFF
                     val prevVal = prev[i].toInt() and 0xFF
-                    if (Math.abs(currVal - prevVal) > pixelThreshold) {
+                    val diff = Math.abs(currVal - prevVal)
+
+                    if (diff > pixelThreshold) {
                         changedPixels++
                         if (width > 0) {
-                            sumX += (i % width)
-                            sumY += (i / width)
+                            val pixelIndex = i
+                            sumX += (pixelIndex % width)
+                            sumY += (pixelIndex / width)
                         }
                     }
                     totalSampled++
@@ -63,19 +75,23 @@ class MotionDetector(
 
                 val motionRatio = if (totalSampled > 0) changedPixels.toFloat() / totalSampled else 0f
 
-                // Trigger motion threshold scaled by sensitivity
-                val triggerThreshold = 0.05f * (1.2f - sensitivity)
+                // Dynamic gain multiplier: ensures motion level bar grows smoothly and visibly
+                val rawIntensity = (motionRatio * 18f).coerceIn(0.0f, 1.0f)
+
+                // Minimum threshold to trigger motion event
+                val triggerThreshold = 0.02f * (1.2f - sensitivity)
 
                 if (motionRatio > triggerThreshold) {
                     val now = System.currentTimeMillis()
-                    if (now - lastTriggerTime > triggerCooldownMs) {
-                        lastTriggerTime = now
-                        val snapshotBitmap = convertYuvToBitmap(image)
-                        val intensity = (motionRatio * 5f).coerceIn(0.1f, 1.0f)
-                        val centerX = if (changedPixels > 0 && width > 0) (sumX.toFloat() / changedPixels) / width else 0.5f
-                        val centerY = if (changedPixels > 0 && height > 0) (sumY.toFloat() / changedPixels) / height else 0.5f
-                        onMotionDetected(intensity, snapshotBitmap, centerX, centerY)
-                    }
+                    val centerX = if (changedPixels > 0 && width > 0) (sumX.toFloat() / changedPixels) / width else 0.5f
+                    val centerY = if (changedPixels > 0 && height > 0) (sumY.toFloat() / changedPixels) / height else 0.5f
+
+                    val snapshotBitmap = if (now - lastSnapshotTime > snapshotCooldownMs) {
+                        lastSnapshotTime = now
+                        convertYuvToBitmap(image)
+                    } else null
+
+                    onMotionDetected(rawIntensity.coerceAtLeast(0.15f), snapshotBitmap, centerX, centerY)
                 }
             }
 
@@ -98,6 +114,7 @@ class MotionDetector(
             val vSize = vBuffer.remaining()
 
             val nv21 = ByteArray(ySize + uSize + vSize)
+
             yBuffer.get(nv21, 0, ySize)
             vBuffer.get(nv21, ySize, vSize)
             uBuffer.get(nv21, ySize + vSize, uSize)
@@ -108,6 +125,7 @@ class MotionDetector(
             val imageBytes = out.toByteArray()
             BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
         } catch (e: Exception) {
+            e.printStackTrace()
             null
         }
     }
