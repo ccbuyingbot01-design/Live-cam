@@ -1,5 +1,6 @@
 package com.example.cctv.ui.components
 
+import android.util.Log
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -12,11 +13,13 @@ import io.livekit.android.room.track.VideoTrack
 import livekit.org.webrtc.EglBase
 import livekit.org.webrtc.RendererCommon
 
+private const val TAG = "LiveKitVideoRenderer"
+
 /**
  * LiveKitVideoRenderer
  *
  * Renders remote LiveKit WebRTC VideoTrack directly onto a native TextureViewRenderer.
- * Delivers global sub-second (<300ms) ultra-low latency streaming over mobile SIM networks.
+ * Uses safe CONFIG_PLAIN EGL initialization to avoid emulator EGL_BAD_ATTRIBUTE errors.
  */
 @Composable
 fun LiveKitVideoRenderer(
@@ -26,23 +29,49 @@ fun LiveKitVideoRenderer(
     if (videoTrack == null) return
 
     val context = LocalContext.current
-    val eglBase = remember { EglBase.create() }
+    val eglBase = remember {
+        try {
+            EglBase.create(null, EglBase.CONFIG_PLAIN)
+        } catch (e: Exception) {
+            Log.w(TAG, "Fallback to default EglBase.create()", e)
+            EglBase.create()
+        }
+    }
+
     val renderer = remember(context) {
         TextureViewRenderer(context).apply {
-            init(eglBase.eglBaseContext, null)
-            setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+            try {
+                init(eglBase.eglBaseContext, null)
+                setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                setEnableHardwareScaler(true)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing TextureViewRenderer", e)
+            }
         }
     }
 
     DisposableEffect(videoTrack) {
-        videoTrack.addRenderer(renderer)
+        try {
+            videoTrack.addRenderer(renderer)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error adding renderer to videoTrack", e)
+        }
+
         onDispose {
             try {
                 videoTrack.removeRenderer(renderer)
+            } catch (e: Exception) {
+                Log.w(TAG, "Error removing renderer from videoTrack", e)
+            }
+            try {
                 renderer.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error releasing renderer", e)
+            }
+            try {
                 eglBase.release()
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.w(TAG, "Error releasing eglBase", e)
             }
         }
     }

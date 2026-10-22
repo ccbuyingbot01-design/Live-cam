@@ -508,8 +508,12 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                         if (deviceMode.value == DeviceMode.CAMERA_SENDER) {
                             val dev = currentDevice.value
 
-                            // Only publish cloud snapshot every 1500ms to eliminate HTTP serialization lag
-                            // Real-time video is streamed peer-to-peer over UDP/hardware encoder!
+                            // Ensure LiveKit Cloud WebRTC Sender connection is active
+                            if (!liveKitManager.isConnectedOrConnecting()) {
+                                startLiveKitSender("lovecctv_${user.username}")
+                            }
+
+                            // Publish fast lightweight metadata to Supabase (isLive, torch, siren, battery)
                             if (now - lastCloudPublishTime >= 1500L) {
                                 lastCloudPublishTime = now
                                 val publishOk = repository.supabaseService.publishStream(
@@ -520,7 +524,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                                     sirenActive = dev.sirenActive,
                                     nightVision = dev.nightVision,
                                     batteryLevel = dev.batteryLevel,
-                                    frameBase64 = _latestFrameBase64.value,
+                                    frameBase64 = null,
                                     recordingActive = _isRecording.value
                                 )
                                 repository.setCloudConnected(publishOk)
@@ -537,6 +541,11 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                             }
 
                         } else if (deviceMode.value == DeviceMode.VIEWER_MONITOR) {
+                            // Ensure LiveKit Cloud WebRTC Viewer connection is active
+                            if (!liveKitManager.isConnectedOrConnecting()) {
+                                startLiveKitViewer("lovecctv_${user.username}")
+                            }
+
                             // Viewer mode: fetch stream metadata from camera user
                             val stream = repository.supabaseService.fetchStream(user.username)
                             if (stream != null) {

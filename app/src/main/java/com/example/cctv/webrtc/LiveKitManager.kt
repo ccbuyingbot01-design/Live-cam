@@ -5,6 +5,7 @@ import android.util.Log
 import io.livekit.android.LiveKit
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
+import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.VideoTrack
 import kotlinx.coroutines.CoroutineScope
@@ -14,13 +15,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * LiveKitManager
  *
  * Ultra-low latency (<300ms) WebRTC cloud streaming engine powered by LiveKit Cloud.
- * Features aggressive frame dropping, zero-buffer queueing, hardware MediaCodec acceleration,
- * and seamless network reconnection listeners when switching between Wi-Fi and mobile SIM data.
+ * Features thread-safe connection locking, auto-reconnection listeners, and clean room state management.
  */
 class LiveKitManager(private val context: Context) {
 
@@ -32,6 +34,9 @@ class LiveKitManager(private val context: Context) {
     var room: Room = LiveKit.create(context)
         private set
 
+    private val connectMutex = Mutex()
+    private var currentConnectedRoom: String? = null
+    private var currentIsSender: Boolean? = null
     private var eventsJob: Job? = null
 
     private val _isConnected = MutableStateFlow(false)
@@ -43,6 +48,22 @@ class LiveKitManager(private val context: Context) {
     private val _remoteVideoTrack = MutableStateFlow<VideoTrack?>(null)
     val remoteVideoTrack: StateFlow<VideoTrack?> = _remoteVideoTrack.asStateFlow()
 
+    fun isConnectedOrConnecting(): Boolean {
+        val state = room.state
+        return state == Room.State.CONNECTED || state == Room.State.CONNECTING || state == Room.State.RECONNECTING
+    }
+
+    /**
+     * Initializes a TextureViewRenderer using the room's internal EglBase.
+     */
+    fun initVideoRenderer(view: TextureViewRenderer) {
+        try {
+            room.initVideoRenderer(view)
+        } catch (e: Exception) {
+            Log.w(TAG, "initVideoRenderer fallback", e)
+        }
+    }
+
     /**
      * Connects to LiveKit Cloud as Camera Sender and publishes hardware-accelerated video & audio tracks.
      */
@@ -50,16 +71,31 @@ class LiveKitManager(private val context: Context) {
         roomName: String = "lovecctv_room",
         identity: String = "camera_sender_1",
         wsUrl: String = LIVEKIT_CLOUD_URL
-    ): Boolean {
+    ): Boolean = connectMutex.withLock {
         return try {
+            if (isConnectedOrConnecting()) {
+                if (currentConnectedRoom == roomName && currentIsSender == true) {
+                    Log.d(TAG, "Already connected/connecting as sender to room $roomName")
+                    return true
+                }
+                Log.d(TAG, "Disconnecting previous session before connecting as sender...")
+                try {
+                    room.disconnect()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error disconnecting previous session", e)
+                }
+            }
+
             val token = LiveKitTokenGenerator.generateAccessToken(
                 roomName = roomName,
                 identity = identity,
                 isPublisher = true
             )
 
-            Log.i(TAG, "Connecting Camera Sender to LiveKit Cloud ($wsUrl)...")
+            Log.i(TAG, "Connecting Camera Sender to LiveKit Cloud ($wsUrl, room: $roomName)...")
             room.connect(wsUrl, token)
+            currentConnectedRoom = roomName
+            currentIsSender = true
             _isConnected.value = true
             _isReconnecting.value = false
 
@@ -85,15 +121,28 @@ class LiveKitManager(private val context: Context) {
         wsUrl: String = LIVEKIT_CLOUD_URL,
         scope: CoroutineScope,
         onVideoTrackSubscribed: (VideoTrack) -> Unit = {}
-    ): Boolean {
+    ): Boolean = connectMutex.withLock {
         return try {
+            if (isConnectedOrConnecting()) {
+                if (currentConnectedRoom == roomName && currentIsSender == false) {
+                    Log.d(TAG, "Already connected/connecting as viewer to room $roomName")
+                    return true
+                }
+                Log.d(TAG, "Disconnecting previous session before connecting as viewer...")
+                try {
+                    room.disconnect()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error disconnecting previous session", e)
+                }
+            }
+
             val token = LiveKitTokenGenerator.generateAccessToken(
                 roomName = roomName,
                 identity = identity,
                 isPublisher = false
             )
 
-            Log.i(TAG, "Connecting Viewer to LiveKit Cloud ($wsUrl)...")
+            Log.i(TAG, "Connecting Viewer to LiveKit Cloud ($wsUrl, room: $roomName)...")
 
             // Register Room Event Listeners for zero-buffer rendering & network reconnection
             eventsJob?.cancel()
@@ -122,6 +171,8 @@ class LiveKitManager(private val context: Context) {
                             _isConnected.value = false
                             _isReconnecting.value = false
                             _remoteVideoTrack.value = null
+                            currentConnectedRoom = null
+                            currentIsSender = null
                         }
                         else -> Unit
                     }
@@ -129,6 +180,8 @@ class LiveKitManager(private val context: Context) {
             }
 
             room.connect(wsUrl, token)
+            currentConnectedRoom = roomName
+            currentIsSender = false
             _isConnected.value = true
             _isReconnecting.value = false
             Log.i(TAG, "Connected to LiveKit Cloud room as Viewer.")
@@ -162,6 +215,8 @@ class LiveKitManager(private val context: Context) {
             _isConnected.value = false
             _isReconnecting.value = false
             _remoteVideoTrack.value = null
+            currentConnectedRoom = null
+            currentIsSender = null
             Log.i(TAG, "Disconnected LiveKit Room.")
         } catch (e: Exception) {
             Log.e(TAG, "Disconnect error", e)

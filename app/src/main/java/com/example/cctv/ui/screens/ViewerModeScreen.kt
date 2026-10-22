@@ -326,6 +326,24 @@ fun ViewerModeScreen(
                             )
                         }
 
+                        // LiveKit WebRTC Status Badge Overlay
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(10.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (liveKitVideoTrack != null) Color(0xFF00E5FF).copy(alpha = 0.9f) else Color(0xFFFF9100).copy(alpha = 0.85f))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = if (liveKitVideoTrack != null) "● LIVEKIT WebRTC | <300ms LATENCY" else "● LIVEKIT CONNECTING...",
+                                color = Color.Black,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
                         // Heatmap & Motion Timeline & Fullscreen Buttons Row
                         Row(
                             modifier = Modifier
