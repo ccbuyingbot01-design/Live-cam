@@ -130,6 +130,9 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
     private var recordingTimerJob: Job? = null
 
+    // Deduplication set to ensure each remote command ID executes EXACTLY ONCE
+    private val processedCommandIds = java.util.Collections.synchronizedSet(HashSet<Long>())
+
     private val motionDetector = MotionDetector(
         sensitivity = currentDevice.value.motionSensitivity,
         onMotionDetected = { intensity, snapshot, x, y ->
@@ -492,8 +495,11 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                             // Rapidly poll for remote commands from viewer (200ms response time)
                             val commands = repository.supabaseService.fetchPendingCommands(user.username, dev.id)
                             for (cmd in commands) {
-                                handleRemoteCommand(cmd.action)
-                                repository.supabaseService.markCommandConsumed(cmd.id)
+                                if (processedCommandIds.add(cmd.id)) {
+                                    Log.d("CctvViewModel", "Executing single remote command #${cmd.id}: ${cmd.action}")
+                                    handleRemoteCommand(cmd.action)
+                                    repository.supabaseService.markCommandConsumed(cmd.id)
+                                }
                             }
 
                         } else if (deviceMode.value == DeviceMode.VIEWER_MONITOR) {
@@ -562,24 +568,47 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         Log.d("CctvViewModel", "Handling remote command: $action")
         val appCtx = getApplication<Application>()
         when (action) {
+            "turn_torch_on" -> {
+                repository.updateTorch(true)
+                cameraManager.toggleTorch(true, appCtx)
+                videoRecordingManager.toggleTorch(true, appCtx)
+            }
+            "turn_torch_off" -> {
+                repository.updateTorch(false)
+                cameraManager.toggleTorch(false, appCtx)
+                videoRecordingManager.toggleTorch(false, appCtx)
+            }
             "toggle_torch" -> {
                 val newState = !currentDevice.value.torchOn
                 repository.updateTorch(newState)
-                Log.d("CctvViewModel", "Toggling torch to: $newState")
                 cameraManager.toggleTorch(newState, appCtx)
                 videoRecordingManager.toggleTorch(newState, appCtx)
             }
+            "turn_siren_on" -> {
+                sirenPlayer.startSiren(viewModelScope)
+                _isSirenRinging.value = true
+                repository.setSirenState(true)
+            }
+            "turn_siren_off" -> {
+                sirenPlayer.stopSiren()
+                _isSirenRinging.value = false
+                repository.setSirenState(false)
+            }
             "toggle_siren" -> {
-                Log.d("CctvViewModel", "Toggling siren")
                 toggleSirenAlarm()
             }
             "toggle_lens" -> {
                 val newFront = !currentDevice.value.lensFacingFront
                 repository.updateLensFacing(newFront)
             }
+            "turn_night_vision_on" -> {
+                repository.toggleNightVision(true)
+            }
+            "turn_night_vision_off" -> {
+                repository.toggleNightVision(false)
+            }
             "toggle_night_vision" -> {
                 val newState = !currentDevice.value.nightVision
-                Log.d("CctvViewModel", "Toggling night vision to: $newState")
                 repository.toggleNightVision(newState)
             }
             "start_recording" -> {
@@ -600,18 +629,6 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
             repository.logMotionEvent(intensity, snapshot, xRatio, yRatio)
             val latest = repository.motionEvents.value.firstOrNull()
             _recentMotionAlert.value = latest
-
-            val user = _supabaseUser.value
-            if (user != null && latest != null) {
-                if (intensity > 0.7f && !currentDevice.value.torchOn) {
-                    triggerFlashOnMotion()
-                }
-
-                if (intensity > 0.7f && currentDevice.value.sirenActive) {
-                    sirenPlayer.startSiren(viewModelScope)
-                    _isSirenRinging.value = true
-                }
-            }
         }
     }
 

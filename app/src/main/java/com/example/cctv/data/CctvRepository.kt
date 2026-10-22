@@ -130,8 +130,7 @@ class CctvRepository {
         }
         _pairedDevices.value = updated
         val newState = updated.find { it.id == deviceId }?.torchOn ?: false
-        remoteCommandCloud(deviceId, "toggle_torch")
-        // Also update stream table for immediate viewer feedback
+        remoteCommandCloud(deviceId, if (newState) "turn_torch_on" else "turn_torch_off")
         CoroutineScope(Dispatchers.IO).launch {
             val user = username ?: return@launch
             supabaseService.updateRemoteControl(user, torchOn = newState)
@@ -143,7 +142,8 @@ class CctvRepository {
             if (dev.id == deviceId) dev.copy(sirenActive = !dev.sirenActive) else dev
         }
         _pairedDevices.value = updated
-        remoteCommandCloud(deviceId, "toggle_siren")
+        val newState = updated.find { it.id == deviceId }?.sirenActive ?: false
+        remoteCommandCloud(deviceId, if (newState) "turn_siren_on" else "turn_siren_off")
     }
 
     fun remoteToggleLens(deviceId: String) {
@@ -159,7 +159,8 @@ class CctvRepository {
             if (dev.id == deviceId) dev.copy(nightVision = !dev.nightVision) else dev
         }
         _pairedDevices.value = updated
-        remoteCommandCloud(deviceId, "toggle_night_vision")
+        val newState = updated.find { it.id == deviceId }?.nightVision ?: false
+        remoteCommandCloud(deviceId, if (newState) "turn_night_vision_on" else "turn_night_vision_off")
     }
 
     fun remoteToggleRecording(deviceId: String) {
