@@ -93,17 +93,15 @@ class LiveKitManager(private val context: Context) {
         wsUrl: String = LIVEKIT_CLOUD_URL
     ): Boolean = connectMutex.withLock {
         return try {
-            if (isConnectedOrConnecting()) {
-                if (currentConnectedRoom == roomName && currentIsSender == true) {
-                    Log.d(TAG, "Already connected as sender to room $roomName")
-                    return true
-                }
-                Log.d(TAG, "Disconnecting previous session before connecting as sender...")
+            if (isConnectedOrConnecting() || room.state != Room.State.DISCONNECTED) {
+                Log.d(TAG, "Disconnecting previous LiveKit session before connecting as sender...")
+                try {
+                    room.release()
+                } catch (_: Exception) {}
                 try {
                     room.disconnect()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error disconnecting previous session", e)
-                }
+                } catch (_: Exception) {}
+                room = LiveKit.create(context)
             }
 
             val token = LiveKitTokenGenerator.generateAccessToken(

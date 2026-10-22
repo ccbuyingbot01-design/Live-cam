@@ -310,9 +310,8 @@ fun LoveCctvApp(
                     supabaseUser?.let { user ->
                         RoleChoiceScreen(
                             user = user,
-                            initialRememberChoice = viewModel.getRememberChoice(),
-                            onSelectRole = { selectedMode, rememberChoice ->
-                                viewModel.setDeviceModeAndRemember(selectedMode, rememberChoice)
+                            onSelectRole = { selectedMode ->
+                                viewModel.setDeviceModeAndRemember(selectedMode, true)
                                 currentDestination = AppDestination.SURVEILLANCE_MAIN
                             }
                         )
