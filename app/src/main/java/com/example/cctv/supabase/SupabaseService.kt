@@ -166,6 +166,7 @@ class SupabaseService {
         sirenActive: Boolean,
         nightVision: Boolean,
         batteryLevel: Int,
+        frameBase64: String? = null,
         recordingActive: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -178,6 +179,9 @@ class SupabaseService {
                 put("night_vision", nightVision)
                 put("battery_level", batteryLevel)
                 put("recording_active", recordingActive)
+                if (!frameBase64.isNullOrEmpty()) {
+                    put("frame_base64", frameBase64)
+                }
                 put("updated_at", System.currentTimeMillis())
             }.toString().toRequestBody(jsonMediaType)
 

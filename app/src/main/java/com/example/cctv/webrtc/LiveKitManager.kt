@@ -87,14 +87,31 @@ class LiveKitManager(private val context: Context) {
 
     /**
      * Feeds CameraX real-time bitmaps directly into LiveKit's WebRTC hardware encoder pipeline.
+     * Downscales high-resolution bitmaps (max 640px) and caps rate to ~15 FPS to ensure lightweight UDP packets
+     * that pass through mobile SIM carrier CGNAT MTU limits without frame drops.
      */
     fun pushBitmapFrame(bitmap: Bitmap, rotation: Int = 0) {
         if (!_isConnected.value && !_isReconnecting.value) return
-        lastFramePushTime = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
+        if (now - lastFramePushTime < 60L) return // Cap at 15 FPS max for network stability
+        lastFramePushTime = now
+
         try {
-            bitmapCapturer?.pushBitmap(bitmap, rotation)
+            val maxDim = 640
+            val w = bitmap.width
+            val h = bitmap.height
+            val scaledBmp = if (w > maxDim || h > maxDim) {
+                val ratio = minOf(maxDim.toFloat() / w, maxDim.toFloat() / h)
+                val newW = (w * ratio).toInt().coerceAtLeast(1)
+                val newH = (h * ratio).toInt().coerceAtLeast(1)
+                Bitmap.createScaledBitmap(bitmap, newW, newH, true)
+            } else {
+                bitmap
+            }
+
+            bitmapCapturer?.pushBitmap(scaledBmp, rotation)
         } catch (e: Exception) {
-            // Buffer full or drop frame for zero latency
+            Log.w(TAG, "pushBitmapFrame error on cellular stream", e)
         }
     }
 

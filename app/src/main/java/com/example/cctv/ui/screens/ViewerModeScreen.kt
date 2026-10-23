@@ -304,22 +304,27 @@ fun ViewerModeScreen(
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         val displayBitmap = liveStreamBitmap
+                        var forceCellularJpegFallback by remember { mutableStateOf(false) }
 
                         if (liveKitVideoTrack != null || displayBitmap != null) {
-                            if (liveKitVideoTrack != null) {
-                                if (!isFullScreen) {
-                                    com.example.cctv.ui.components.LiveKitVideoRenderer(
-                                        videoTrack = liveKitVideoTrack,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                }
-                            } else if (displayBitmap != null) {
+                            // Base layer: render JPEG stream bitmap whenever available (ensures video on SIM mobile networks)
+                            if (displayBitmap != null) {
                                 androidx.compose.foundation.Image(
                                     bitmap = displayBitmap.asImageBitmap(),
                                     contentDescription = "Live Camera Feed",
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
                                 )
+                            }
+
+                            // Overlay layer: LiveKit WebRTC Video Track (if active and not forced to SIM fallback)
+                            if (liveKitVideoTrack != null && !forceCellularJpegFallback) {
+                                if (!isFullScreen) {
+                                    com.example.cctv.ui.components.LiveKitVideoRenderer(
+                                        videoTrack = liveKitVideoTrack,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
                             }
 
                             MotionHeatmapOverlay(
@@ -373,12 +378,15 @@ fun ViewerModeScreen(
                                         .background(
                                             when {
                                                 liveKitReconnecting -> Color(0xFFFF3D00).copy(alpha = 0.9f)
+                                                forceCellularJpegFallback -> Color(0xFFFF9100).copy(alpha = 0.9f)
                                                 liveKitVideoTrack != null -> Color(0xFF00E5FF).copy(alpha = 0.9f)
                                                 else -> Color(0xFFFF9100).copy(alpha = 0.85f)
                                             }
                                         )
                                         .clickable {
-                                            if (liveKitReconnecting || liveKitVideoTrack == null) {
+                                            if (liveKitVideoTrack != null) {
+                                                forceCellularJpegFallback = !forceCellularJpegFallback
+                                            } else {
                                                 viewModel.forceReconnectLiveKit()
                                             }
                                         }
@@ -387,8 +395,9 @@ fun ViewerModeScreen(
                                     Text(
                                         text = when {
                                             liveKitReconnecting -> "🔄 RECONNECTING (#$liveKitReconnectAttempt)... TAP TO RETRY"
-                                            liveKitVideoTrack != null -> "● LIVEKIT WebRTC | <300ms LATENCY"
-                                            else -> "● LIVEKIT CONNECTING | $liveKitHealthStatus"
+                                            forceCellularJpegFallback -> "● SIM DATA FEED (JPEG) | TAP FOR WEBRTC"
+                                            liveKitVideoTrack != null -> "● LIVEKIT WebRTC | TAP FOR SIM FEED"
+                                            else -> "● CELLULAR FEED | $liveKitHealthStatus"
                                         },
                                         color = Color.Black,
                                         fontSize = 10.sp,
@@ -544,17 +553,19 @@ fun ViewerModeScreen(
                     val displayBitmap = liveStreamBitmap
 
                     if (liveKitVideoTrack != null || displayBitmap != null) {
-                        if (liveKitVideoTrack != null) {
-                            com.example.cctv.ui.components.LiveKitVideoRenderer(
-                                videoTrack = liveKitVideoTrack,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else if (displayBitmap != null) {
+                        if (displayBitmap != null) {
                             androidx.compose.foundation.Image(
                                 bitmap = displayBitmap.asImageBitmap(),
                                 contentDescription = "Full Size Live Stream",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Fit
+                            )
+                        }
+
+                        if (liveKitVideoTrack != null) {
+                            com.example.cctv.ui.components.LiveKitVideoRenderer(
+                                videoTrack = liveKitVideoTrack,
+                                modifier = Modifier.fillMaxSize()
                             )
                         }
 

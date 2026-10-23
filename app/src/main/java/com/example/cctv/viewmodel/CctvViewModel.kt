@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.BatteryManager
 import android.os.PowerManager
 import android.util.Log
+import android.util.Base64
 import com.example.cctv.service.AiBatteryOptimizer
 import com.example.cctv.service.BatteryReport
 import com.example.cctv.service.StreamingPerformanceProfile
@@ -803,8 +804,8 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                                 startLiveKitSender("lovecctv_${user.username}")
                             }
 
-                            // Publish fast lightweight metadata to Supabase (isLive, torch, siren, battery)
-                            val syncInterval = if (dev.isLowPowerMode) 3500L else 1500L
+                            // Publish fast lightweight metadata and frame to Supabase for cellular SIM fallback
+                            val syncInterval = if (dev.isLowPowerMode) 3500L else 1200L
                             if (now - lastCloudPublishTime >= syncInterval) {
                                 lastCloudPublishTime = now
                                 val publishOk = repository.supabaseService.publishStream(
@@ -815,6 +816,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                                     sirenActive = dev.sirenActive,
                                     nightVision = dev.nightVision,
                                     batteryLevel = dev.batteryLevel,
+                                    frameBase64 = _latestFrameBase64.value,
                                     recordingActive = _isRecording.value
                                 )
                                 repository.setCloudConnected(publishOk)
@@ -836,11 +838,28 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                                 startLiveKitViewer("lovecctv_${user.username.lowercase()}")
                             }
 
-                            // Viewer mode: fetch stream metadata from camera user
+                            // Viewer mode: fetch stream metadata and cellular fallback frame from camera user
                             val stream = repository.supabaseService.fetchStream(user.username)
                             if (stream != null) {
                                 repository.setCloudConnected(stream.isLive)
                                 _remoteStreamLive.value = stream.isLive
+                                _remoteFrameBase64.value = stream.frameBase64
+
+                                // If stream frameBase64 is present, decode as live image fallback for SIM networks
+                                stream.frameBase64?.let { b64 ->
+                                    if (b64.isNotBlank()) {
+                                        try {
+                                            val bytes = Base64.decode(b64, Base64.DEFAULT)
+                                            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                            if (bmp != null) {
+                                                _liveStreamBitmap.value = bmp
+                                                runViewerHumanDetection(bmp)
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.w("CctvViewModel", "Error decoding cloud fallback frame: ${e.message}")
+                                        }
+                                    }
+                                }
 
                                 // Sync remote camera state to paired devices
                                 val updatedList = pairedDevices.value.map { d ->
