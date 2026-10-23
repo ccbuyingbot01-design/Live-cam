@@ -552,20 +552,27 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         _latestFrameBase64.value = base64
     }
 
-    fun startLiveKitSender(roomName: String = "lovecctv_" + (_supabaseUser.value?.username ?: "camera")) {
+    fun getSanitizedRoomName(username: String? = null): String {
+        val u = username ?: _supabaseUser.value?.username ?: "camera"
+        val clean = u.trim().lowercase().replace(Regex("[^a-z0-9]"), "")
+        val finalUser = if (clean.isBlank()) "camera" else clean
+        return "lovecctv_$finalUser"
+    }
+
+    fun startLiveKitSender(roomName: String = getSanitizedRoomName()) {
         viewModelScope.launch {
             liveKitManager.connectAsSender(
-                roomName = roomName,
+                roomName = getSanitizedRoomName(roomName),
                 identity = "camera_" + currentDevice.value.id,
                 scope = viewModelScope
             )
         }
     }
 
-    fun startLiveKitViewer(roomName: String = "lovecctv_" + (_supabaseUser.value?.username ?: "camera")) {
+    fun startLiveKitViewer(roomName: String = getSanitizedRoomName()) {
         viewModelScope.launch {
             liveKitManager.connectAsViewer(
-                roomName = roomName,
+                roomName = getSanitizedRoomName(roomName),
                 identity = "viewer_mobile_app",
                 scope = viewModelScope
             )
@@ -801,7 +808,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
                             // Ensure LiveKit Cloud WebRTC Sender connection is active
                             if (!liveKitManager.isConnectedOrConnecting()) {
-                                startLiveKitSender("lovecctv_${user.username}")
+                                startLiveKitSender(getSanitizedRoomName(user.username))
                             }
 
                             // Publish fast lightweight metadata and frame to Supabase for cellular SIM fallback
@@ -835,7 +842,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                         } else if (deviceMode.value == DeviceMode.VIEWER_MONITOR) {
                             // Ensure LiveKit Cloud WebRTC Viewer connection is active
                             if (!liveKitManager.isConnectedOrConnecting()) {
-                                startLiveKitViewer("lovecctv_${user.username.lowercase()}")
+                                startLiveKitViewer(getSanitizedRoomName(user.username))
                             }
 
                             // Viewer mode: fetch stream metadata and cellular fallback frame from camera user

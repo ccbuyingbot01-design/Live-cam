@@ -13,15 +13,29 @@ import javax.crypto.spec.SecretKeySpec
  */
 object LiveKitTokenGenerator {
 
-    private const val DEFAULT_API_KEY = "API6fjiWe8nJ9z8"
-    private const val DEFAULT_API_SECRET = "mS2KkidQg7ltcSLtgeU2W1ermfBngmIoQ9qQLpu0Y85B"
-    const val LIVEKIT_CLOUD_URL = "wss://live-cam-g2een99y.livekit.cloud"
+    val LIVEKIT_CLOUD_URL: String
+        get() {
+            val url = try { com.example.BuildConfig.LIVEKIT_URL } catch (_: Throwable) { null }
+            return if (url.isNullOrBlank() || url == "MY_LIVEKIT_URL") "wss://live-cam-g2een99y.livekit.cloud" else url
+        }
+
+    val LIVEKIT_API_KEY: String
+        get() {
+            val key = try { com.example.BuildConfig.LIVEKIT_API_KEY } catch (_: Throwable) { null }
+            return if (key.isNullOrBlank() || key == "MY_LIVEKIT_API_KEY") "APIoUizemAhL4XR" else key
+        }
+
+    val LIVEKIT_API_SECRET: String
+        get() {
+            val secret = try { com.example.BuildConfig.LIVEKIT_API_SECRET } catch (_: Throwable) { null }
+            return if (secret.isNullOrBlank() || secret == "MY_LIVEKIT_API_SECRET") "OmqL8hsDwstYmL4s4ObjoEs0ox32DsoSx910q24wyCM" else secret
+        }
 
     fun generateAccessToken(
         roomName: String,
         identity: String,
-        apiKey: String = DEFAULT_API_KEY,
-        apiSecret: String = DEFAULT_API_SECRET,
+        apiKey: String = LIVEKIT_API_KEY,
+        apiSecret: String = LIVEKIT_API_SECRET,
         isPublisher: Boolean = true,
         ttlSeconds: Long = 86400L // 24 hours
     ): String {

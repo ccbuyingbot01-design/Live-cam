@@ -138,8 +138,7 @@ fun ViewerModeScreen(
     val supabaseUser by viewModel.supabaseUser.collectAsState()
 
     LaunchedEffect(supabaseUser?.username) {
-        val user = supabaseUser?.username ?: "camera"
-        viewModel.startLiveKitViewer("lovecctv_$user")
+        viewModel.startLiveKitViewer(viewModel.getSanitizedRoomName(supabaseUser?.username))
     }
 
     Box(modifier = modifier.fillMaxSize().testTag("viewer_mode_screen")) {

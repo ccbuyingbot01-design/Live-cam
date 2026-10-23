@@ -20,6 +20,9 @@ android {
     versionName = "1.0.1"
 
     buildConfigField("String", "GEMINI_API_KEY", "\"MY_GEMINI_API_KEY\"")
+    buildConfigField("String", "LIVEKIT_URL", "\"wss://live-cam-g2een99y.livekit.cloud\"")
+    buildConfigField("String", "LIVEKIT_API_KEY", "\"APIoUizemAhL4XR\"")
+    buildConfigField("String", "LIVEKIT_API_SECRET", "\"OmqL8hsDwstYmL4s4ObjoEs0ox32DsoSx910q24wyCM\"")
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 

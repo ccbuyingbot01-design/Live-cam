@@ -33,7 +33,7 @@ class LiveKitManager(private val context: Context) {
 
     companion object {
         private const val TAG = "LiveKitManager"
-        const val LIVEKIT_CLOUD_URL = LiveKitTokenGenerator.LIVEKIT_CLOUD_URL
+        val LIVEKIT_CLOUD_URL: String get() = LiveKitTokenGenerator.LIVEKIT_CLOUD_URL
         private const val MAX_RECONNECT_ATTEMPTS = 15
         private const val STREAM_STALL_THRESHOLD_MS = 7000L
     }
@@ -45,7 +45,7 @@ class LiveKitManager(private val context: Context) {
     private var lastRoomName: String? = null
     private var lastIdentity: String? = null
     private var lastIsSender: Boolean? = null
-    private var lastWsUrl: String = LIVEKIT_CLOUD_URL
+    private var lastWsUrl: String = LiveKitTokenGenerator.LIVEKIT_CLOUD_URL
 
     private var eventsJob: Job? = null
     private var watchdogJob: Job? = null
@@ -121,11 +121,12 @@ class LiveKitManager(private val context: Context) {
     suspend fun connectAsSender(
         roomName: String = "lovecctv_room",
         identity: String = "camera_sender_1",
-        wsUrl: String = LIVEKIT_CLOUD_URL,
+        wsUrl: String = LiveKitTokenGenerator.LIVEKIT_CLOUD_URL,
         scope: CoroutineScope? = null
     ): Boolean = connectMutex.withLock {
         if (scope != null) externalScope = scope
-        lastRoomName = roomName
+        val normalizedRoom = roomName.trim().lowercase()
+        lastRoomName = normalizedRoom
         lastIdentity = identity
         lastIsSender = true
         lastWsUrl = wsUrl
@@ -134,8 +135,8 @@ class LiveKitManager(private val context: Context) {
 
         return try {
             if (isConnectedOrConnecting()) {
-                if (room.state == Room.State.CONNECTED && lastRoomName == roomName && lastIsSender == true) {
-                    Log.d(TAG, "Already connected as sender to room $roomName")
+                if (room.state == Room.State.CONNECTED && lastRoomName == normalizedRoom && lastIsSender == true) {
+                    Log.d(TAG, "Already connected as sender to room $normalizedRoom")
                     return true
                 }
                 Log.d(TAG, "Resetting previous session before connecting as sender...")
@@ -143,12 +144,12 @@ class LiveKitManager(private val context: Context) {
             }
 
             val token = LiveKitTokenGenerator.generateAccessToken(
-                roomName = roomName,
+                roomName = normalizedRoom,
                 identity = identity,
                 isPublisher = true
             )
 
-            Log.i(TAG, "Connecting Camera Sender to LiveKit Cloud ($wsUrl, room: $roomName)...")
+            Log.i(TAG, "Connecting Camera Sender to LiveKit Cloud ($wsUrl, room: $normalizedRoom)...")
             room.connect(wsUrl, token)
             _isConnected.value = true
             _isReconnecting.value = false
@@ -185,13 +186,14 @@ class LiveKitManager(private val context: Context) {
     suspend fun connectAsViewer(
         roomName: String = "lovecctv_room",
         identity: String = "viewer_monitor_1",
-        wsUrl: String = LIVEKIT_CLOUD_URL,
+        wsUrl: String = LiveKitTokenGenerator.LIVEKIT_CLOUD_URL,
         scope: CoroutineScope,
         onVideoTrackSubscribed: (VideoTrack) -> Unit = {}
     ): Boolean = connectMutex.withLock {
         externalScope = scope
         savedOnTrackSubscribed = onVideoTrackSubscribed
-        lastRoomName = roomName
+        val normalizedRoom = roomName.trim().lowercase()
+        lastRoomName = normalizedRoom
         lastIdentity = identity
         lastIsSender = false
         lastWsUrl = wsUrl
@@ -200,8 +202,8 @@ class LiveKitManager(private val context: Context) {
 
         return try {
             if (isConnectedOrConnecting()) {
-                if (room.state == Room.State.CONNECTED && lastRoomName == roomName && lastIsSender == false) {
-                    Log.d(TAG, "Already connected as viewer to room $roomName")
+                if (room.state == Room.State.CONNECTED && lastRoomName == normalizedRoom && lastIsSender == false) {
+                    Log.d(TAG, "Already connected as viewer to room $normalizedRoom")
                     return true
                 }
                 Log.d(TAG, "Resetting session before connecting as viewer...")
@@ -209,12 +211,12 @@ class LiveKitManager(private val context: Context) {
             }
 
             val token = LiveKitTokenGenerator.generateAccessToken(
-                roomName = roomName,
+                roomName = normalizedRoom,
                 identity = identity,
                 isPublisher = false
             )
 
-            Log.i(TAG, "Connecting Viewer to LiveKit Cloud ($wsUrl, room: $roomName)...")
+            Log.i(TAG, "Connecting Viewer to LiveKit Cloud ($wsUrl, room: $normalizedRoom)...")
 
             eventsJob?.cancel()
             eventsJob = scope.launch(Dispatchers.IO) {
