@@ -1,5 +1,6 @@
 package com.example.cctv.service
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,9 +10,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.net.wifi.WifiManager
+import androidx.core.content.ContextCompat
 import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
@@ -151,26 +154,42 @@ class CctvForegroundService : Service() {
         isServiceRunning = true
         acquireWakeLock()
         acquireWifiLock()
-        StorageCompressorService.startService(this)
+        try {
+            StorageCompressorService.startService(this)
+        } catch (_: Exception) {}
 
         val notification = buildForegroundNotification()
 
         // Mandatory startForeground call within 5 seconds on Android 8+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                } else {
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                val hasCameraPerm = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                val hasMicPerm = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+                var fgsType = 0
+                if (hasCameraPerm) {
+                    fgsType = fgsType or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
                 }
-                startForeground(NOTIFICATION_ID, notification, fgsType)
+                if (hasMicPerm) {
+                    fgsType = fgsType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                }
+
+                if (fgsType != 0) {
+                    startForeground(NOTIFICATION_ID, notification, fgsType)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
-            Log.i(TAG, "Foreground surveillance service started successfully with camera|microphone type.")
+            Log.i(TAG, "Foreground surveillance service started successfully.")
         } catch (e: Exception) {
             Log.e(TAG, "startForeground error", e)
-            startForeground(NOTIFICATION_ID, notification)
+            try {
+                startForeground(NOTIFICATION_ID, notification)
+            } catch (inner: Exception) {
+                Log.e(TAG, "Fallback startForeground failed", inner)
+            }
         }
     }
 

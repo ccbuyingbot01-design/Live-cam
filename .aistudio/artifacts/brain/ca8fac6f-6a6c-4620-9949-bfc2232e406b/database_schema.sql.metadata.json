@@ -1,5 +1,0 @@
-{
-  "summary":  "Complete Supabase SQL schema for Love CCTV, including cctv_device_preferences for remembering phone role (Live Cam / View Cam) and auto-start on boot, along with tables for streams, motion alerts, commands, paired devices, and FCM tokens.",
-  "updatedAt":  "2026-10-22T22:21:37.096436787Z",
-  "userFacing":  true
-}

@@ -619,7 +619,6 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                                     sirenActive = dev.sirenActive,
                                     nightVision = dev.nightVision,
                                     batteryLevel = dev.batteryLevel,
-                                    frameBase64 = null,
                                     recordingActive = _isRecording.value
                                 )
                                 repository.setCloudConnected(publishOk)
@@ -638,7 +637,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                         } else if (deviceMode.value == DeviceMode.VIEWER_MONITOR) {
                             // Ensure LiveKit Cloud WebRTC Viewer connection is active
                             if (!liveKitManager.isConnectedOrConnecting()) {
-                                startLiveKitViewer("lovecctv_${user.username}")
+                                startLiveKitViewer("lovecctv_${user.username.lowercase()}")
                             }
 
                             // Viewer mode: fetch stream metadata from camera user
@@ -646,10 +645,6 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                             if (stream != null) {
                                 repository.setCloudConnected(stream.isLive)
                                 _remoteStreamLive.value = stream.isLive
-                                if (_liveStreamBitmap.value == null) {
-                                    // Fallback to cloud frame only if direct P2P UDP frame is not received yet
-                                    _remoteFrameBase64.value = stream.frameBase64
-                                }
 
                                 // Sync remote camera state to paired devices
                                 val updatedList = pairedDevices.value.map { d ->

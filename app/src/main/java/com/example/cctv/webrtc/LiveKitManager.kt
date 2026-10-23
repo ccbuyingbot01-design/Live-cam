@@ -187,6 +187,14 @@ class LiveKitManager(private val context: Context) {
                                 onVideoTrackSubscribed(track)
                             }
                         }
+                        is RoomEvent.TrackPublished -> {
+                            Log.i(TAG, "Remote track published in room: ${event.publication.sid}")
+                            val track = event.publication.track
+                            if (track is VideoTrack) {
+                                _remoteVideoTrack.value = track
+                                onVideoTrackSubscribed(track)
+                            }
+                        }
                         is RoomEvent.Reconnecting -> {
                             Log.w(TAG, "LiveKit room reconnecting due to network switch (Wi-Fi <-> SIM)...")
                             _isReconnecting.value = true
@@ -195,6 +203,7 @@ class LiveKitManager(private val context: Context) {
                             Log.i(TAG, "LiveKit room reconnected successfully!")
                             _isReconnecting.value = false
                             _isConnected.value = true
+                            checkExistingTracks(onVideoTrackSubscribed)
                         }
                         is RoomEvent.Disconnected -> {
                             Log.w(TAG, "Disconnected from LiveKit room")
@@ -215,11 +224,32 @@ class LiveKitManager(private val context: Context) {
             _isConnected.value = true
             _isReconnecting.value = false
             Log.i(TAG, "Connected to LiveKit Cloud room as Viewer.")
+
+            // Check if sender was already connected and published track prior to viewer joining
+            checkExistingTracks(onVideoTrackSubscribed)
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to connect LiveKit Viewer", e)
             _isConnected.value = false
             false
+        }
+    }
+
+    private fun checkExistingTracks(onVideoTrackSubscribed: (VideoTrack) -> Unit) {
+        try {
+            for ((_, participant) in room.remoteParticipants) {
+                for ((publication, track) in participant.videoTrackPublications) {
+                    val videoTrack = track ?: publication.track
+                    if (videoTrack is VideoTrack) {
+                        Log.i(TAG, "Found existing remote LiveKit video track from participant ${participant.identity}: ${videoTrack.name}")
+                        _remoteVideoTrack.value = videoTrack
+                        onVideoTrackSubscribed(videoTrack)
+                        return
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error checking existing tracks", e)
         }
     }
 

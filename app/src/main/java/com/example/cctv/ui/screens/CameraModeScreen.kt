@@ -464,6 +464,9 @@ fun CameraModeScreen(
                 },
                 onPairCode = { code ->
                     viewModel.pairNewDevice(code)
+                },
+                onClearPairedDevices = {
+                    supabaseUser?.username?.let { u -> viewModel.clearPairedDevicesForUser(u) }
                 }
             )
         }

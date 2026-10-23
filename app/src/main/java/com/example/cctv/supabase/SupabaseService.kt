@@ -1,5 +1,6 @@
 package com.example.cctv.supabase
 
+import android.net.Uri
 import android.util.Log
 import com.example.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -165,7 +166,6 @@ class SupabaseService {
         sirenActive: Boolean,
         nightVision: Boolean,
         batteryLevel: Int,
-        frameBase64: String? = null,
         recordingActive: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -178,9 +178,6 @@ class SupabaseService {
                 put("night_vision", nightVision)
                 put("battery_level", batteryLevel)
                 put("recording_active", recordingActive)
-                if (frameBase64 != null) {
-                    put("frame_base64", frameBase64)
-                }
                 put("updated_at", System.currentTimeMillis())
             }.toString().toRequestBody(jsonMediaType)
 
@@ -623,6 +620,23 @@ class SupabaseService {
             emptyList()
         }
     }
+    suspend fun cleanUpStalePairedDevices(username: String, activeDeviceName: String, activePairingCode: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            // Delete old non-hashed or duplicate entries for this device_name that have a different pairing_code
+            val request = Request.Builder()
+                .url("$baseUrl/rest/v1/cctv_paired_devices?username=eq.$username&device_name=eq.${Uri.encode(activeDeviceName)}&pairing_code=neq.$activePairingCode")
+                .header("apikey", anonKey)
+                .header("Authorization", "Bearer $anonKey")
+                .delete()
+                .build()
+            val response = client.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "cleanUpStalePairedDevices error", e)
+            false
+        }
+    }
+
     suspend fun clearAllPairedDevices(username: String): Boolean = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder()

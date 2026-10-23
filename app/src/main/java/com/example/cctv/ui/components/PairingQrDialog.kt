@@ -63,6 +63,7 @@ fun PairingQrDialog(
     onDismiss: () -> Unit,
     onScanQr: (() -> Unit)? = null,
     onPairCode: ((String) -> Unit)? = null,
+    onClearPairedDevices: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
@@ -263,6 +264,28 @@ fun PairingQrDialog(
                         Text(
                             "Scan Partner's QR Code",
                             color = NeonCyanPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                if (onClearPairedDevices != null) {
+                    OutlinedButton(
+                        onClick = {
+                            onClearPairedDevices()
+                        },
+                        border = androidx.compose.foundation.BorderStroke(1.dp, com.example.ui.theme.LoveAlertRed),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("clear_db_paired_btn")
+                    ) {
+                        Text(
+                            "Clear Stale Paired Devices in Database",
+                            color = com.example.ui.theme.LoveAlertRed,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }

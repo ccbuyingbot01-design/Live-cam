@@ -207,17 +207,36 @@ class CctvRepository {
 
     // ── User & Pairing ────────────────────────────────────────────────────
 
+    private fun generateHashedCode(user: String, deviceId: String): String {
+        return try {
+            val input = "${user.lowercase().trim()}_${deviceId.trim()}"
+            val bytes = java.security.MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+            val hex = bytes.joinToString("") { "%02X".format(it) }
+            "HASH-${hex.take(8)}"
+        } catch (e: Exception) {
+            "HASH-" + (100000..999999).random()
+        }
+    }
+
     fun setUsername(user: String) {
         username = user
-        // Register this device in Supabase and reset stream controls to OFF state
-        val dev = _currentDevice.value
+        val currentDev = _currentDevice.value
+        val hashedCode = generateHashedCode(user, currentDev.id)
+        val updatedDev = currentDev.copy(pairingCode = hashedCode)
+        _currentDevice.value = updatedDev
+
         CoroutineScope(Dispatchers.IO).launch {
+            // Clean up previous stale non-hashed or duplicate device entries in database
+            supabaseService.cleanUpStalePairedDevices(user, updatedDev.name, hashedCode)
+
+            // Register this device with its deterministic hashed code
             supabaseService.createPairedDevice(
                 username = user,
-                pairingCode = dev.pairingCode,
-                deviceName = dev.name,
-                ipAddress = dev.ipAddress
+                pairingCode = hashedCode,
+                deviceName = updatedDev.name,
+                ipAddress = updatedDev.ipAddress
             )
+
             // Reset remote stream controls on new session start
             supabaseService.publishStream(
                 username = user,
@@ -226,11 +245,11 @@ class CctvRepository {
                 lensFacingFront = false,
                 sirenActive = false,
                 nightVision = false,
-                batteryLevel = dev.batteryLevel,
+                batteryLevel = updatedDev.batteryLevel,
                 recordingActive = false
             )
-            Log.d("CctvRepository", "Device registered and stream reset for user: $user")
-            // Fetch existing paired devices for this user
+            Log.d("CctvRepository", "Device registered with hashed code ($hashedCode) for user: $user")
+            // Fetch all devices on the same account -> AUTOMATIC PAIRING across any network
             refreshPairedDevices()
         }
     }
@@ -241,10 +260,10 @@ class CctvRepository {
         val user = username ?: return false
 
         CoroutineScope(Dispatchers.IO).launch {
-            // First check if device with this code exists
+            // First check if device with this code exists in DB
             val existing = supabaseService.getPairedDeviceByCode(cleanCode)
             if (existing != null) {
-                // Device found – add it under our user as well
+                // Device found – add under user
                 supabaseService.createPairedDevice(
                     username = user,
                     pairingCode = cleanCode,
@@ -252,7 +271,7 @@ class CctvRepository {
                     ipAddress = existing.ipAddress
                 )
             } else {
-                // Register new unknown device
+                // Register new device entry
                 supabaseService.createPairedDevice(
                     username = user,
                     pairingCode = cleanCode,
@@ -275,10 +294,14 @@ class CctvRepository {
     suspend fun refreshPairedDevices() {
         val user = username ?: return
         val devices = supabaseService.listDevicesForUser(user)
-        // Exclude self
+        // Deduplicate devices by pairingCode and exclude self
         val selfCode = _currentDevice.value.pairingCode
-        val filtered = devices.filter { it.pairingCode != selfCode }
-        Log.d("CctvRepository", "Found ${filtered.size} devices for user: $user")
+        val selfId = _currentDevice.value.id
+        val filtered = devices
+            .filter { it.pairingCode != selfCode && it.id != selfId }
+            .distinctBy { it.pairingCode }
+
+        Log.d("CctvRepository", "Found ${filtered.size} auto-paired devices for user: $user")
         _pairedDevices.value = filtered
         if (_selectedCameraId.value.isBlank() && filtered.isNotEmpty()) {
             _selectedCameraId.value = filtered.first().id
@@ -364,7 +387,6 @@ class CctvRepository {
             sirenActive = dev.sirenActive,
             nightVision = dev.nightVision,
             batteryLevel = dev.batteryLevel,
-            frameBase64 = null,
             recordingActive = dev.isRecording
         )
     }

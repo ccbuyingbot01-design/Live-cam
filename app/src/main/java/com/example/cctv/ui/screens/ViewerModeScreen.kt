@@ -294,14 +294,7 @@ fun ViewerModeScreen(
                     .testTag("viewer_feed_player")
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    val displayBitmap = liveStreamBitmap ?: remember(remoteFrame) {
-                        if (remoteStreamLive && remoteFrame != null) {
-                            try {
-                                val bytes = Base64.decode(remoteFrame, Base64.DEFAULT)
-                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                            } catch (e: Exception) { null }
-                        } else null
-                    }
+                    val displayBitmap = liveStreamBitmap
 
                     if (liveKitVideoTrack != null || displayBitmap != null) {
                         if (liveKitVideoTrack != null) {
@@ -625,14 +618,7 @@ fun ViewerModeScreen(
                         .fillMaxSize()
                         .background(Color.Black)
                 ) {
-                    val displayBitmap = liveStreamBitmap ?: remember(remoteFrame) {
-                        if (remoteStreamLive && remoteFrame != null) {
-                            try {
-                                val bytes = Base64.decode(remoteFrame, Base64.DEFAULT)
-                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                            } catch (e: Exception) { null }
-                        } else null
-                    }
+                    val displayBitmap = liveStreamBitmap
 
                     if (liveKitVideoTrack != null || displayBitmap != null) {
                         if (liveKitVideoTrack != null) {

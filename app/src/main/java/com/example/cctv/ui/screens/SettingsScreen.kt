@@ -295,5 +295,67 @@ fun SettingsScreen(viewModel: CctvViewModel) {
                 }
             }
         }
+
+        // Section 3: Paired Devices DB Table Cleanup
+        val supabaseUser by viewModel.supabaseUser.collectAsState()
+        Card(
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            shape = RoundedCornerShape(16.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Shield,
+                        contentDescription = "Database",
+                        tint = NeonCyanPrimary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "ACCOUNT & PAIRED DEVICES DATABASE",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "Current Account: ${supabaseUser?.username ?: "Guest"}",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Hashed Pairing Code: ${device.pairingCode}",
+                    color = NeonCyanPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Button(
+                    onClick = {
+                        supabaseUser?.username?.let { u -> viewModel.clearPairedDevicesForUser(u) }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = com.example.ui.theme.LoveAlertRed.copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "Clear Stale Paired Devices in Database",
+                        color = com.example.ui.theme.LoveAlertRed,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
     }
 }
