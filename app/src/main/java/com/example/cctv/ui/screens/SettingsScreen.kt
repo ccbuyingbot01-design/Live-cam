@@ -250,21 +250,66 @@ fun SettingsScreen(viewModel: CctvViewModel) {
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Text(
-                    text = "Motion Sensitivity: ${(device.motionSensitivity * 100).toInt()}%",
+                    text = "Motion Detection Sensitivity Threshold: ${(device.motionSensitivity * 100).toInt()}%",
                     color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Text(
+                    text = "Adjust threshold level to reduce false alerts from minor background movements like wind, leaves, light shifts, shadows, or small pets.",
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 8.dp)
                 )
 
                 Slider(
                     value = device.motionSensitivity,
-                    onValueChange = { viewModel.repository.updateMotionSensitivity(it) },
+                    onValueChange = { viewModel.setMotionSensitivity(it) },
                     valueRange = 0.1f..1.0f,
                     colors = SliderDefaults.colors(
                         thumbColor = NeonCyanPrimary,
-                        activeTrackColor = NeonCyanPrimary
-                    )
+                        activeTrackColor = NeonCyanPrimary,
+                        inactiveTrackColor = DarkBorder
+                    ),
+                    modifier = Modifier.testTag("motion_sensitivity_slider")
                 )
+
+                // Quick Presets Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp, bottom = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    val currentPct = (device.motionSensitivity * 100).toInt()
+                    listOf(
+                        "Low (25%)" to 0.25f,
+                        "Medium (50%)" to 0.50f,
+                        "High (85%)" to 0.85f
+                    ).forEach { (label, value) ->
+                        val isSelected = Math.abs(device.motionSensitivity - value) < 0.08f
+                        Button(
+                            onClick = { viewModel.setMotionSensitivity(value) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isSelected) NeonCyanPrimary else com.example.ui.theme.DarkSurfaceVariant
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 3.dp)
+                                .height(34.dp)
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (isSelected) Color.Black else Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
