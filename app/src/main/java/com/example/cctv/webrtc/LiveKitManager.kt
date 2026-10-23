@@ -2,14 +2,15 @@ package com.example.cctv.webrtc
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.os.Build
 import android.util.Log
 import io.livekit.android.LiveKit
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
 import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
+import io.livekit.android.room.track.CameraPosition
 import io.livekit.android.room.track.LocalVideoTrack
+import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.VideoTrack
 import io.livekit.android.room.track.video.BitmapFrameCapturer
 import kotlinx.coroutines.CoroutineScope
@@ -26,38 +27,16 @@ import kotlinx.coroutines.sync.withLock
  * LiveKitManager
  *
  * Ultra-low latency (<300ms) WebRTC cloud streaming engine powered by LiveKit Cloud.
- * Automatically detects emulator/container environments and safely bypasses WebRTC native
- * worker threads (LK_RTC_THREAD_1) to prevent SIGSEGV crashes, falling back to Supabase + UDP streaming.
+ * Uses BitmapFrameCapturer to stream directly from CameraX frames with zero camera device conflict.
  */
 class LiveKitManager(private val context: Context) {
 
     companion object {
         private const val TAG = "LiveKitManager"
         const val LIVEKIT_CLOUD_URL = LiveKitTokenGenerator.LIVEKIT_CLOUD_URL
-
-        fun isEmulator(): Boolean {
-            return Build.FINGERPRINT.startsWith("generic") ||
-                   Build.FINGERPRINT.startsWith("unknown") ||
-                   Build.MODEL.contains("google_sdk") ||
-                   Build.MODEL.contains("Emulator") ||
-                   Build.MODEL.contains("Android SDK built for x86") ||
-                   Build.HARDWARE.contains("goldfish") ||
-                   Build.HARDWARE.contains("ranchu") ||
-                   Build.BOARD.contains("qc") ||
-                   Build.DEVICE.contains("generic")
-        }
     }
 
-    var room: Room? = if (isEmulator()) {
-        null
-    } else {
-        try {
-            LiveKit.create(context)
-        } catch (t: Throwable) {
-            com.example.cctv.util.DebugLogger.e(TAG, "Failed to initialize LiveKit room instance", t)
-            null
-        }
-    }
+    var room: Room = LiveKit.create(context)
         private set
 
     private val connectMutex = Mutex()
@@ -77,9 +56,7 @@ class LiveKitManager(private val context: Context) {
     val remoteVideoTrack: StateFlow<VideoTrack?> = _remoteVideoTrack.asStateFlow()
 
     fun isConnectedOrConnecting(): Boolean {
-        if (isEmulator()) return _isConnected.value
-        val r = room ?: return false
-        val state = r.state
+        val state = room.state
         return state == Room.State.CONNECTED || state == Room.State.CONNECTING || state == Room.State.RECONNECTING
     }
 
@@ -88,7 +65,7 @@ class LiveKitManager(private val context: Context) {
      */
     fun initVideoRenderer(view: TextureViewRenderer) {
         try {
-            room?.initVideoRenderer(view)
+            room.initVideoRenderer(view)
         } catch (e: Exception) {
             Log.w(TAG, "initVideoRenderer fallback", e)
         }
@@ -108,36 +85,26 @@ class LiveKitManager(private val context: Context) {
 
     /**
      * Connects to LiveKit Cloud as Camera Sender using BitmapFrameCapturer.
-     * Safely bypasses WebRTC native threads in emulator/container environments.
+     * Prevents hardware collision with CameraX, ensuring the local viewfinder never goes black.
      */
     suspend fun connectAsSender(
         roomName: String = "lovecctv_room",
         identity: String = "camera_sender_1",
         wsUrl: String = LIVEKIT_CLOUD_URL
     ): Boolean = connectMutex.withLock {
-        if (isEmulator()) {
-            Log.i(TAG, "Emulator container environment detected: Bypassing WebRTC native worker threads to prevent SIGSEGV. Using Supabase Realtime + UDP streaming.")
-            _isConnected.value = true
-            return true
-        }
-
         return try {
-            val r = room ?: run {
-                room = try { LiveKit.create(context) } catch (t: Throwable) {
-                    com.example.cctv.util.DebugLogger.e(TAG, "Failed to create LiveKit room in connectAsSender", t)
-                    null
+            if (isConnectedOrConnecting()) {
+                if (currentConnectedRoom == roomName && currentIsSender == true) {
+                    Log.d(TAG, "Already connected as sender to room $roomName")
+                    return true
                 }
-                room ?: return false
+                Log.d(TAG, "Disconnecting previous session before connecting as sender...")
+                try {
+                    room.disconnect()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error disconnecting previous session", e)
+                }
             }
-
-            if (isConnectedOrConnecting() || r.state != Room.State.DISCONNECTED) {
-                Log.d(TAG, "Disconnecting previous LiveKit session before connecting as sender...")
-                try { r.release() } catch (_: Throwable) {}
-                try { r.disconnect() } catch (_: Throwable) {}
-                room = try { LiveKit.create(context) } catch (_: Throwable) { r }
-            }
-
-            val activeRoom = room ?: return false
 
             val token = LiveKitTokenGenerator.generateAccessToken(
                 roomName = roomName,
@@ -146,19 +113,16 @@ class LiveKitManager(private val context: Context) {
             )
 
             Log.i(TAG, "Connecting Camera Sender to LiveKit Cloud ($wsUrl, room: $roomName)...")
-            activeRoom.connect(wsUrl, token)
+            room.connect(wsUrl, token)
             currentConnectedRoom = roomName
             currentIsSender = true
             _isConnected.value = true
             _isReconnecting.value = false
 
-            val localParticipant = activeRoom.localParticipant
-            try {
-                localParticipant.setMicrophoneEnabled(true)
-            } catch (t: Throwable) {
-                com.example.cctv.util.DebugLogger.w(TAG, "Microphone enable warning: ${t.message}", t)
-            }
+            val localParticipant = room.localParticipant
+            localParticipant.setMicrophoneEnabled(true)
 
+            // Create and publish custom BitmapFrameCapturer track from CameraX frames
             val capturer = BitmapFrameCapturer()
             bitmapCapturer = capturer
             val videoTrack = localParticipant.createVideoTrack(
@@ -170,8 +134,8 @@ class LiveKitManager(private val context: Context) {
 
             Log.i(TAG, "Successfully published CameraX LiveKit WebRTC video track to LiveKit Cloud!")
             true
-        } catch (e: Throwable) {
-            com.example.cctv.util.DebugLogger.e(TAG, "Failed to connect LiveKit Sender: ${e.message}", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to connect LiveKit Sender", e)
             _isConnected.value = false
             bitmapCapturer = null
             customVideoTrack = null
@@ -180,8 +144,7 @@ class LiveKitManager(private val context: Context) {
     }
 
     /**
-     * Connects to LiveKit Cloud as Viewer with zero-buffer frame dropping.
-     * Safely bypasses WebRTC native threads in emulator/container environments.
+     * Connects to LiveKit Cloud as Viewer with zero-buffer frame dropping and auto-reconnection listeners.
      */
     suspend fun connectAsViewer(
         roomName: String = "lovecctv_room",
@@ -190,25 +153,16 @@ class LiveKitManager(private val context: Context) {
         scope: CoroutineScope,
         onVideoTrackSubscribed: (VideoTrack) -> Unit = {}
     ): Boolean = connectMutex.withLock {
-        if (isEmulator()) {
-            Log.i(TAG, "Emulator container environment detected: Bypassing WebRTC native worker threads. Using Supabase Realtime + UDP streaming.")
-            _isConnected.value = true
-            return true
-        }
-
         return try {
-            val r = room ?: run {
-                room = try { LiveKit.create(context) } catch (_: Exception) { null }
-                room ?: return false
-            }
-
             if (isConnectedOrConnecting()) {
                 if (currentConnectedRoom == roomName && currentIsSender == false) {
                     Log.d(TAG, "Already connected as viewer to room $roomName")
                     return true
                 }
                 Log.d(TAG, "Disconnecting previous session before connecting as viewer...")
-                try { r.disconnect() } catch (e: Exception) {
+                try {
+                    room.disconnect()
+                } catch (e: Exception) {
                     Log.w(TAG, "Error disconnecting previous session", e)
                 }
             }
@@ -223,43 +177,39 @@ class LiveKitManager(private val context: Context) {
 
             eventsJob?.cancel()
             eventsJob = scope.launch(Dispatchers.IO) {
-                try {
-                    r.events.collect { event ->
-                        when (event) {
-                            is RoomEvent.TrackSubscribed -> {
-                                val track = event.track
-                                if (track is VideoTrack) {
-                                    Log.i(TAG, "Subscribed to remote LiveKit video track: ${track.name}")
-                                    _remoteVideoTrack.value = track
-                                    onVideoTrackSubscribed(track)
-                                }
+                room.events.collect { event ->
+                    when (event) {
+                        is RoomEvent.TrackSubscribed -> {
+                            val track = event.track
+                            if (track is VideoTrack) {
+                                Log.i(TAG, "Subscribed to remote LiveKit video track (<300ms latency): ${track.name}")
+                                _remoteVideoTrack.value = track
+                                onVideoTrackSubscribed(track)
                             }
-                            is RoomEvent.Reconnecting -> {
-                                Log.w(TAG, "LiveKit room reconnecting...")
-                                _isReconnecting.value = true
-                            }
-                            is RoomEvent.Reconnected -> {
-                                Log.i(TAG, "LiveKit room reconnected successfully!")
-                                _isReconnecting.value = false
-                                _isConnected.value = true
-                            }
-                            is RoomEvent.Disconnected -> {
-                                Log.w(TAG, "Disconnected from LiveKit room")
-                                _isConnected.value = false
-                                _isReconnecting.value = false
-                                _remoteVideoTrack.value = null
-                                currentConnectedRoom = null
-                                currentIsSender = null
-                            }
-                            else -> Unit
                         }
+                        is RoomEvent.Reconnecting -> {
+                            Log.w(TAG, "LiveKit room reconnecting due to network switch (Wi-Fi <-> SIM)...")
+                            _isReconnecting.value = true
+                        }
+                        is RoomEvent.Reconnected -> {
+                            Log.i(TAG, "LiveKit room reconnected successfully!")
+                            _isReconnecting.value = false
+                            _isConnected.value = true
+                        }
+                        is RoomEvent.Disconnected -> {
+                            Log.w(TAG, "Disconnected from LiveKit room")
+                            _isConnected.value = false
+                            _isReconnecting.value = false
+                            _remoteVideoTrack.value = null
+                            currentConnectedRoom = null
+                            currentIsSender = null
+                        }
+                        else -> Unit
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Room events collection error", e)
                 }
             }
 
-            r.connect(wsUrl, token)
+            room.connect(wsUrl, token)
             currentConnectedRoom = roomName
             currentIsSender = false
             _isConnected.value = true
@@ -281,7 +231,7 @@ class LiveKitManager(private val context: Context) {
             eventsJob?.cancel()
             bitmapCapturer = null
             customVideoTrack = null
-            room?.disconnect()
+            room.disconnect()
             _isConnected.value = false
             _isReconnecting.value = false
             _remoteVideoTrack.value = null

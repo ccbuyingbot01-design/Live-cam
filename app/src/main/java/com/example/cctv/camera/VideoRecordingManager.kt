@@ -142,9 +142,9 @@ class VideoRecordingManager {
 
                 // Build VideoCapture universally compatible with all Android devices (API 24+)
                 try {
-                    val qualitySelector = QualitySelector.from(
-                        Quality.LOWEST,
-                        FallbackStrategy.higherQualityOrLowerThan(Quality.LOWEST)
+                    val qualitySelector = QualitySelector.fromOrderedList(
+                        listOf(Quality.SD, Quality.HD, Quality.LOWEST),
+                        FallbackStrategy.lowerQualityOrHigherThan(Quality.LOWEST)
                     )
                     val recorder = Recorder.Builder()
                         .setQualitySelector(qualitySelector)
@@ -154,63 +154,52 @@ class VideoRecordingManager {
                     videoCapture = capture
                     useCases.add(capture)
                     Log.d(TAG, "VideoCapture built successfully.")
-                } catch (e: Throwable) {
-                    com.example.cctv.util.DebugLogger.w(TAG, "QualitySelector failed, trying default Recorder.Builder(): ${e.message}", e)
+                } catch (e: Exception) {
+                    Log.w(TAG, "QualitySelector failed, trying default Recorder.Builder(): ${e.message}")
                     try {
                         val recorder = Recorder.Builder().build()
                         val capture = VideoCapture.withOutput(recorder)
                         videoCapture = capture
                         useCases.add(capture)
-                    } catch (e2: Throwable) {
-                        com.example.cctv.util.DebugLogger.e(TAG, "VideoCapture unavailable on this hardware: ${e2.message}", e2)
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "VideoCapture unavailable on device: ${e2.message}")
                     }
                 }
 
                 if (frameAnalyzer != null) {
-                    try {
-                        val imageAnalysis = ImageAnalysis.Builder()
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .setTargetResolution(android.util.Size(640, 360))
-                            .build()
-                        imageAnalysis.setAnalyzer(analysisExecutor, frameAnalyzer)
-                        useCases.add(imageAnalysis)
-                    } catch (eAnalysis: Throwable) {
-                        com.example.cctv.util.DebugLogger.e(TAG, "ImageAnalysis creation failed: ${eAnalysis.message}", eAnalysis)
-                    }
+                    val imageAnalysis = ImageAnalysis.Builder()
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .setTargetResolution(android.util.Size(640, 360))
+                        .build()
+                    imageAnalysis.setAnalyzer(analysisExecutor, frameAnalyzer)
+                    useCases.add(imageAnalysis)
                 }
 
                 try {
                     camera = provider.bindToLifecycle(lifecycleOwner, cameraSelector, *useCases.toTypedArray())
                     Log.d(TAG, "Camera use cases bound successfully (useCases=${useCases.size}).")
                     onReady?.invoke(true)
-                } catch (bindEx: Throwable) {
-                    com.example.cctv.util.DebugLogger.w(TAG, "3 use-case bind failed, prioritizing Preview + ImageAnalysis for live stream: ${bindEx.message}", bindEx)
+                } catch (bindEx: Exception) {
+                    // Fallback for devices that cannot bind Preview + VideoCapture + ImageAnalysis concurrently (e.g. LEGACY/LIMITED devices)
+                    Log.w(TAG, "3 use-case bind failed, prioritizing Preview + VideoCapture", bindEx)
                     provider.unbindAll()
                     val fallbackCases = mutableListOf<UseCase>(preview)
-                    val imageAnalysisCase = useCases.firstOrNull { it is ImageAnalysis }
-                    if (imageAnalysisCase != null) {
-                        fallbackCases.add(imageAnalysisCase)
-                    } else if (videoCapture != null) {
+                    if (videoCapture != null) {
                         fallbackCases.add(videoCapture!!)
                     }
                     try {
                         camera = provider.bindToLifecycle(lifecycleOwner, cameraSelector, *fallbackCases.toTypedArray())
-                        Log.d(TAG, "Fallback bound Preview + ImageAnalysis successfully.")
+                        Log.d(TAG, "Fallback bound Preview + VideoCapture successfully.")
                         onReady?.invoke(true)
-                    } catch (e2: Throwable) {
-                        com.example.cctv.util.DebugLogger.e(TAG, "Fallback bind failed, binding Preview only: ${e2.message}", e2)
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Fallback bind failed, binding Preview only", e2)
                         provider.unbindAll()
-                        try {
-                            camera = provider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
-                            onReady?.invoke(true)
-                        } catch (e3: Throwable) {
-                            com.example.cctv.util.DebugLogger.e(TAG, "CRITICAL: Preview binding failed: ${e3.message}", e3)
-                            onReady?.invoke(false)
-                        }
+                        camera = provider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
+                        onReady?.invoke(true)
                     }
                 }
-            } catch (e: Throwable) {
-                com.example.cctv.util.DebugLogger.e(TAG, "Failed to bind camera + recorder: ${e.message}", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to bind camera + recorder", e)
                 onReady?.invoke(false)
             }
         }, ContextCompat.getMainExecutor(context))

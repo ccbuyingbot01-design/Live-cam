@@ -541,7 +541,7 @@ class SupabaseService {
             }.toString().toRequestBody(jsonMediaType)
 
             val request = Request.Builder()
-                .url("$baseUrl/rest/v1/cctv_paired_devices?on_conflict=username,pairing_code")
+                .url("$baseUrl/rest/v1/cctv_paired_devices?on_conflict=pairing_code")
                 .header("apikey", anonKey)
                 .header("Authorization", "Bearer $anonKey")
                 .header("Content-Type", "application/json")

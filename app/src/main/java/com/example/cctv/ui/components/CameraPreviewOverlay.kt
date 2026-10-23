@@ -34,7 +34,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -102,19 +101,8 @@ fun CameraPreviewOverlay(
     LaunchedEffect(device.lensFacingFront) {
         boundPreviewView?.let { pv ->
             pv.post {
-                try {
-                    viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
-                } catch (e: Exception) {
-                    android.util.Log.e("CameraPreviewOverlay", "Camera re-bind error on lens switch: ${e.message}", e)
-                }
+                viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
             }
-        }
-    }
-
-    // Clean up camera binding when preview component leaves composition
-    DisposableEffect(Unit) {
-        onDispose {
-            boundPreviewView = null
         }
     }
 
@@ -137,11 +125,7 @@ fun CameraPreviewOverlay(
                 }.also { pv ->
                     boundPreviewView = pv
                     pv.post {
-                        try {
-                            viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
-                        } catch (e: Exception) {
-                            android.util.Log.e("CameraPreviewOverlay", "Camera binding error: ${e.message}", e)
-                        }
+                        viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
                     }
                 }
             },

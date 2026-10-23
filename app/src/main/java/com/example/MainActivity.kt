@@ -72,9 +72,6 @@ import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.NeonCyanPrimary
 import com.example.ui.theme.TextSecondary
 
-import com.example.cctv.ui.components.DebugConsoleOverlay
-import com.example.cctv.util.DebugLogger
-
 enum class AppDestination {
     AUTH,
     ROLE_CHOICE,
@@ -100,23 +97,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Initialize global DebugLogger to capture all errors & uncaught crashes
-        DebugLogger.init(applicationContext)
-        DebugLogger.i("MainActivity", "App started. Debug console active on all screens.")
-
         requestInitialPermissions()
 
         setContent {
             MyApplicationTheme {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    LoveCctvApp(
-                        viewModel = viewModel,
-                        onRequestPermissions = { requestInitialPermissions() }
-                    )
-
-                    // Always-on Debug Mode overlay box on top of EVERY page
-                    DebugConsoleOverlay()
-                }
+                LoveCctvApp(
+                    viewModel = viewModel,
+                    onRequestPermissions = { requestInitialPermissions() }
+                )
             }
         }
     }
@@ -322,8 +310,9 @@ fun LoveCctvApp(
                     supabaseUser?.let { user ->
                         RoleChoiceScreen(
                             user = user,
-                            onSelectRole = { selectedMode ->
-                                viewModel.setDeviceModeAndRemember(selectedMode, true)
+                            initialRememberChoice = viewModel.getRememberChoice(),
+                            onSelectRole = { selectedMode, rememberChoice ->
+                                viewModel.setDeviceModeAndRemember(selectedMode, rememberChoice)
                                 currentDestination = AppDestination.SURVEILLANCE_MAIN
                             }
                         )

@@ -60,7 +60,7 @@ import kotlinx.coroutines.launch
 
 class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
-    val repository = CctvRepository(application)
+    val repository = CctvRepository()
     val cameraManager = CameraXManager()
     val sirenPlayer = SirenPlayer()
     val supabaseService = SupabaseService()
@@ -281,20 +281,16 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         lifecycleOwner: LifecycleOwner,
         previewView: PreviewView
     ) {
-        try {
-            val dev = currentDevice.value
-            motionDetector.updateSensitivity(dev.motionSensitivity)
+        val dev = currentDevice.value
+        motionDetector.updateSensitivity(dev.motionSensitivity)
 
-            cameraManager.startCamera(
-                context = context,
-                lifecycleOwner = lifecycleOwner,
-                previewView = previewView,
-                motionAnalyzer = if (dev.motionGuardEnabled) motionDetector else null,
-                useFrontLens = dev.lensFacingFront
-            )
-        } catch (t: Throwable) {
-            com.example.cctv.util.DebugLogger.e("CctvViewModel", "Failed to bind camera to preview: ${t.message}", t)
-        }
+        cameraManager.startCamera(
+            context = context,
+            lifecycleOwner = lifecycleOwner,
+            previewView = previewView,
+            motionAnalyzer = if (dev.motionGuardEnabled) motionDetector else null,
+            useFrontLens = dev.lensFacingFront
+        )
     }
 
     fun bindCameraWithRecorder(
@@ -302,36 +298,18 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         lifecycleOwner: LifecycleOwner,
         previewView: PreviewView
     ) {
-        try {
-            val dev = currentDevice.value
-            try {
-                udpStreamManager.startSender()
-            } catch (t: Throwable) {
-                com.example.cctv.util.DebugLogger.w("CctvViewModel", "UDP Sender start warning: ${t.message}", t)
-            }
-
-            if (_isHardwareEncoding.value) {
-                try {
-                    val started = hardwareEncoder.start()
-                    if (!started) {
-                        _isHardwareEncoding.value = false
-                    }
-                } catch (t: Throwable) {
-                    com.example.cctv.util.DebugLogger.w("CctvViewModel", "Hardware encoder start warning: ${t.message}", t)
-                    _isHardwareEncoding.value = false
-                }
-            }
-
-            videoRecordingManager.startCameraWithRecorder(
-                context = context,
-                lifecycleOwner = lifecycleOwner,
-                previewView = previewView,
-                useFrontLens = dev.lensFacingFront,
-                frameAnalyzer = createFrameAnalyzer()
-            )
-        } catch (t: Throwable) {
-            com.example.cctv.util.DebugLogger.e("CctvViewModel", "Failed to bind camera with recorder: ${t.message}", t)
+        val dev = currentDevice.value
+        udpStreamManager.startSender()
+        if (_isHardwareEncoding.value) {
+            hardwareEncoder.start()
         }
+        videoRecordingManager.startCameraWithRecorder(
+            context = context,
+            lifecycleOwner = lifecycleOwner,
+            previewView = previewView,
+            useFrontLens = dev.lensFacingFront,
+            frameAnalyzer = createFrameAnalyzer()
+        )
     }
 
     /**
@@ -562,17 +540,13 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     // ── Foreground Service ────────────────────────────────────────────────────
 
     fun startForegroundCctvService(context: Context) {
-        try {
-            val serviceIntent = Intent(context, CctvForegroundService::class.java).apply {
-                action = CctvForegroundService.ACTION_START
-            }
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
-            } else {
-                context.startService(serviceIntent)
-            }
-        } catch (t: Throwable) {
-            com.example.cctv.util.DebugLogger.e("CctvViewModel", "Failed to start foreground service: ${t.message}", t)
+        val serviceIntent = Intent(context, CctvForegroundService::class.java).apply {
+            action = CctvForegroundService.ACTION_START
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            context.startForegroundService(serviceIntent)
+        } else {
+            context.startService(serviceIntent)
         }
     }
 
@@ -645,13 +619,13 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                                     sirenActive = dev.sirenActive,
                                     nightVision = dev.nightVision,
                                     batteryLevel = dev.batteryLevel,
-                                    frameBase64 = _latestFrameBase64.value,
+                                    frameBase64 = null,
                                     recordingActive = _isRecording.value
                                 )
                                 repository.setCloudConnected(publishOk)
                             }
 
-                            // Rapidly poll for remote commands from viewer
+                            // Rapidly poll for remote commands from viewer (200ms response time)
                             val commands = repository.supabaseService.fetchPendingCommands(user.username, dev.id)
                             for (cmd in commands) {
                                 if (processedCommandIds.add(cmd.id)) {
@@ -720,7 +694,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                 } catch (e: Exception) {
                     Log.e("CctvViewModel", "Sync loop error", e)
                 }
-                delay(1000L) // Poll/Sync interval
+                delay(100) // Poll/Sync interval
             }
         }
     }
@@ -947,7 +921,7 @@ class UdpStreamManager {
     fun startSender() {
         try {
             if (sendSocket == null || sendSocket?.isClosed == true) {
-                sendSocket = DatagramSocket().apply { broadcast = true }
+                sendSocket = DatagramSocket()
             }
             Log.i(TAG, "UDP Sender socket started.")
         } catch (e: Exception) {
@@ -956,8 +930,7 @@ class UdpStreamManager {
     }
 
     fun sendFrame(frameBytes: ByteArray, targetIp: String, targetPort: Int = DEFAULT_PORT) {
-        val socket = sendSocket ?: return
-        if (targetIp.isBlank()) return
+        if (sendSocket == null || targetIp.isBlank()) return
 
         senderScope.launch {
             try {
@@ -980,9 +953,7 @@ class UdpStreamManager {
 
                     val packetData = buffer.array()
                     val packet = DatagramPacket(packetData, packetData.size, address, targetPort)
-                    try {
-                        socket.send(packet)
-                    } catch (_: Exception) {}
+                    sendSocket?.send(packet)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to send UDP frame", e)
@@ -1178,28 +1149,21 @@ class HardwareMediaCodecEncoder(
     }
 
     private fun drainEncoder() {
-        val codec = mediaCodec ?: return
         val bufferInfo = MediaCodec.BufferInfo()
-        var loopCount = 0
-        while (isEncoderRunning && loopCount < 5) {
-            loopCount++
-            try {
-                val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
-                if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                    break
-                } else if (outputBufferIndex >= 0) {
-                    val outputBuffer = codec.getOutputBuffer(outputBufferIndex)
-                    if (outputBuffer != null && bufferInfo.size > 0) {
-                        outputBuffer.position(bufferInfo.offset)
-                        outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
-                        onEncodedPacket?.invoke(outputBuffer, bufferInfo)
-                    }
-                    codec.releaseOutputBuffer(outputBufferIndex, false)
-                } else {
-                    break
-                }
-            } catch (e: Exception) {
+        while (isEncoderRunning) {
+            val outputBufferIndex = mediaCodec?.dequeueOutputBuffer(bufferInfo, 0) ?: -1
+            if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
                 break
+            } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                Log.d(TAG, "MediaCodec output format changed: ${mediaCodec?.outputFormat}")
+            } else if (outputBufferIndex >= 0) {
+                val outputBuffer = mediaCodec?.getOutputBuffer(outputBufferIndex)
+                if (outputBuffer != null && bufferInfo.size > 0) {
+                    outputBuffer.position(bufferInfo.offset)
+                    outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
+                    onEncodedPacket?.invoke(outputBuffer, bufferInfo)
+                }
+                mediaCodec?.releaseOutputBuffer(outputBufferIndex, false)
             }
         }
     }
