@@ -60,7 +60,7 @@ import kotlinx.coroutines.launch
 
 class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
-    val repository = CctvRepository()
+    val repository = CctvRepository(application)
     val cameraManager = CameraXManager()
     val sirenPlayer = SirenPlayer()
     val supabaseService = SupabaseService()
@@ -301,7 +301,10 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         val dev = currentDevice.value
         udpStreamManager.startSender()
         if (_isHardwareEncoding.value) {
-            hardwareEncoder.start()
+            val started = hardwareEncoder.start()
+            if (!started) {
+                _isHardwareEncoding.value = false
+            }
         }
         videoRecordingManager.startCameraWithRecorder(
             context = context,
@@ -1149,21 +1152,28 @@ class HardwareMediaCodecEncoder(
     }
 
     private fun drainEncoder() {
+        val codec = mediaCodec ?: return
         val bufferInfo = MediaCodec.BufferInfo()
-        while (isEncoderRunning) {
-            val outputBufferIndex = mediaCodec?.dequeueOutputBuffer(bufferInfo, 0) ?: -1
-            if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                break
-            } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                Log.d(TAG, "MediaCodec output format changed: ${mediaCodec?.outputFormat}")
-            } else if (outputBufferIndex >= 0) {
-                val outputBuffer = mediaCodec?.getOutputBuffer(outputBufferIndex)
-                if (outputBuffer != null && bufferInfo.size > 0) {
-                    outputBuffer.position(bufferInfo.offset)
-                    outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
-                    onEncodedPacket?.invoke(outputBuffer, bufferInfo)
+        var loopCount = 0
+        while (isEncoderRunning && loopCount < 5) {
+            loopCount++
+            try {
+                val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
+                if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                    break
+                } else if (outputBufferIndex >= 0) {
+                    val outputBuffer = codec.getOutputBuffer(outputBufferIndex)
+                    if (outputBuffer != null && bufferInfo.size > 0) {
+                        outputBuffer.position(bufferInfo.offset)
+                        outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
+                        onEncodedPacket?.invoke(outputBuffer, bufferInfo)
+                    }
+                    codec.releaseOutputBuffer(outputBufferIndex, false)
+                } else {
+                    break
                 }
-                mediaCodec?.releaseOutputBuffer(outputBufferIndex, false)
+            } catch (e: Exception) {
+                break
             }
         }
     }

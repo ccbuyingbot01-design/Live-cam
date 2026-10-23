@@ -15,18 +15,36 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.UUID
 
-class CctvRepository {
+class CctvRepository(context: android.content.Context? = null) {
 
     private val _deviceMode = MutableStateFlow(DeviceMode.CAMERA_SENDER)
     val deviceMode: StateFlow<DeviceMode> = _deviceMode.asStateFlow()
 
     private val _currentDevice = MutableStateFlow(
-        CctvDevice(
-            id = "CAM-" + UUID.randomUUID().toString().take(6).uppercase(),
-            name = "Love Cam #1 (This Device)",
-            pairingCode = "LOVE-" + (1000..9999).random(),
-            ipAddress = getLocalIpAddress()
-        )
+        run {
+            var devId = "CAM-" + UUID.randomUUID().toString().take(6).uppercase()
+            var pairCode = "LOVE-" + (1000..9999).random()
+            if (context != null) {
+                val prefs = context.getSharedPreferences("cctv_device_identity", android.content.Context.MODE_PRIVATE)
+                val savedId = prefs.getString("device_id", null)
+                val savedCode = prefs.getString("pairing_code", null)
+                if (!savedId.isNullOrBlank() && !savedCode.isNullOrBlank()) {
+                    devId = savedId
+                    pairCode = savedCode
+                } else {
+                    prefs.edit()
+                        .putString("device_id", devId)
+                        .putString("pairing_code", pairCode)
+                        .apply()
+                }
+            }
+            CctvDevice(
+                id = devId,
+                name = "Love Cam (${android.os.Build.MODEL})",
+                pairingCode = pairCode,
+                ipAddress = getLocalIpAddress()
+            )
+        }
     )
     val currentDevice: StateFlow<CctvDevice> = _currentDevice.asStateFlow()
 
