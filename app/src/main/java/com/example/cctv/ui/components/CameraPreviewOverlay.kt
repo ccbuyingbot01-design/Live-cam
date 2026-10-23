@@ -34,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -103,6 +104,13 @@ fun CameraPreviewOverlay(
             pv.post {
                 viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
             }
+        }
+    }
+
+    // Clean up camera binding when preview component leaves composition
+    DisposableEffect(Unit) {
+        onDispose {
+            boundPreviewView = null
         }
     }
 

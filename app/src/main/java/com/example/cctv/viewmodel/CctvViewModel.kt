@@ -622,13 +622,13 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                                     sirenActive = dev.sirenActive,
                                     nightVision = dev.nightVision,
                                     batteryLevel = dev.batteryLevel,
-                                    frameBase64 = null,
+                                    frameBase64 = _latestFrameBase64.value,
                                     recordingActive = _isRecording.value
                                 )
                                 repository.setCloudConnected(publishOk)
                             }
 
-                            // Rapidly poll for remote commands from viewer (200ms response time)
+                            // Rapidly poll for remote commands from viewer
                             val commands = repository.supabaseService.fetchPendingCommands(user.username, dev.id)
                             for (cmd in commands) {
                                 if (processedCommandIds.add(cmd.id)) {
@@ -697,7 +697,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                 } catch (e: Exception) {
                     Log.e("CctvViewModel", "Sync loop error", e)
                 }
-                delay(100) // Poll/Sync interval
+                delay(1000L) // Poll/Sync interval
             }
         }
     }

@@ -142,9 +142,9 @@ class VideoRecordingManager {
 
                 // Build VideoCapture universally compatible with all Android devices (API 24+)
                 try {
-                    val qualitySelector = QualitySelector.fromOrderedList(
-                        listOf(Quality.SD, Quality.HD, Quality.LOWEST),
-                        FallbackStrategy.lowerQualityOrHigherThan(Quality.LOWEST)
+                    val qualitySelector = QualitySelector.from(
+                        Quality.LOWEST,
+                        FallbackStrategy.higherQualityOrLowerThan(Quality.LOWEST)
                     )
                     val recorder = Recorder.Builder()
                         .setQualitySelector(qualitySelector)
@@ -162,7 +162,7 @@ class VideoRecordingManager {
                         videoCapture = capture
                         useCases.add(capture)
                     } catch (e2: Exception) {
-                        Log.e(TAG, "VideoCapture unavailable on device: ${e2.message}")
+                        Log.w(TAG, "VideoCapture unavailable on this hardware: ${e2.message}")
                     }
                 }
 
@@ -181,15 +181,18 @@ class VideoRecordingManager {
                     onReady?.invoke(true)
                 } catch (bindEx: Exception) {
                     // Fallback for devices that cannot bind Preview + VideoCapture + ImageAnalysis concurrently (e.g. LEGACY/LIMITED devices)
-                    Log.w(TAG, "3 use-case bind failed, prioritizing Preview + VideoCapture", bindEx)
+                    Log.w(TAG, "3 use-case bind failed, prioritizing Preview + ImageAnalysis for live stream", bindEx)
                     provider.unbindAll()
                     val fallbackCases = mutableListOf<UseCase>(preview)
-                    if (videoCapture != null) {
+                    val imageAnalysisCase = useCases.firstOrNull { it is ImageAnalysis }
+                    if (imageAnalysisCase != null) {
+                        fallbackCases.add(imageAnalysisCase)
+                    } else if (videoCapture != null) {
                         fallbackCases.add(videoCapture!!)
                     }
                     try {
                         camera = provider.bindToLifecycle(lifecycleOwner, cameraSelector, *fallbackCases.toTypedArray())
-                        Log.d(TAG, "Fallback bound Preview + VideoCapture successfully.")
+                        Log.d(TAG, "Fallback bound Preview + ImageAnalysis successfully.")
                         onReady?.invoke(true)
                     } catch (e2: Exception) {
                         Log.e(TAG, "Fallback bind failed, binding Preview only", e2)
