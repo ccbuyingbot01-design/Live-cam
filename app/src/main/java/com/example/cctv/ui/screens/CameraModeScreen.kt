@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -113,6 +114,25 @@ fun CameraModeScreen(
     var showBatteryDialog by remember { mutableStateOf(false) }
     var isServiceRunning by remember { mutableStateOf(CctvForegroundService.isServiceRunning) }
 
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCameraPermission = granted
+        if (granted) {
+            try {
+                viewModel.startForegroundCctvService(context)
+            } catch (e: Exception) {
+                Log.e("CameraModeScreen", "Foreground service start error", e)
+            }
+        }
+    }
+
     // ── Storage permission launcher ────────────────────────────────────
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -170,12 +190,52 @@ fun CameraModeScreen(
             .background(Color.Black)
             .testTag("camera_mode_screen")
     ) {
-        // Main Viewfinder Preview
-        CameraPreviewOverlay(
-            viewModel = viewModel,
-            device = currentDevice,
-            modifier = Modifier.fillMaxSize()
-        )
+        if (hasCameraPermission) {
+            // Main Viewfinder Preview
+            CameraPreviewOverlay(
+                viewModel = viewModel,
+                device = currentDevice,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            // Permission Grant Request UI
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Cameraswitch,
+                    contentDescription = "Camera Permission",
+                    tint = NeonCyanPrimary,
+                    modifier = Modifier.size(64.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "CAMERA PERMISSION REQUIRED",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Love CCTV needs access to your device camera to stream live video to your monitor phone.",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyanPrimary),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Grant Camera Access", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
 
         // Overlay Stealth Black Screen if enabled
         AnimatedVisibility(

@@ -125,7 +125,11 @@ fun CameraPreviewOverlay(
                 }.also { pv ->
                     boundPreviewView = pv
                     pv.post {
-                        viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
+                        try {
+                            viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
+                        } catch (e: Exception) {
+                            android.util.Log.e("CameraPreviewOverlay", "Camera binding error: ${e.message}", e)
+                        }
                     }
                 }
             },

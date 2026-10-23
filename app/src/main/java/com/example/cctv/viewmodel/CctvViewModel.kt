@@ -924,7 +924,7 @@ class UdpStreamManager {
     fun startSender() {
         try {
             if (sendSocket == null || sendSocket?.isClosed == true) {
-                sendSocket = DatagramSocket()
+                sendSocket = DatagramSocket().apply { broadcast = true }
             }
             Log.i(TAG, "UDP Sender socket started.")
         } catch (e: Exception) {
@@ -933,7 +933,8 @@ class UdpStreamManager {
     }
 
     fun sendFrame(frameBytes: ByteArray, targetIp: String, targetPort: Int = DEFAULT_PORT) {
-        if (sendSocket == null || targetIp.isBlank()) return
+        val socket = sendSocket ?: return
+        if (targetIp.isBlank()) return
 
         senderScope.launch {
             try {
@@ -956,7 +957,9 @@ class UdpStreamManager {
 
                     val packetData = buffer.array()
                     val packet = DatagramPacket(packetData, packetData.size, address, targetPort)
-                    sendSocket?.send(packet)
+                    try {
+                        socket.send(packet)
+                    } catch (_: Exception) {}
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to send UDP frame", e)

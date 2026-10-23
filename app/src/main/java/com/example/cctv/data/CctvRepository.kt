@@ -293,10 +293,10 @@ class CctvRepository(context: android.content.Context? = null) {
     suspend fun refreshPairedDevices() {
         val user = username ?: return
         val devices = supabaseService.listDevicesForUser(user)
-        // Exclude self
+        // Exclude self and deduplicate by pairing code
         val selfCode = _currentDevice.value.pairingCode
-        val filtered = devices.filter { it.pairingCode != selfCode }
-        Log.d("CctvRepository", "Found ${filtered.size} devices for user: $user")
+        val filtered = devices.filter { it.pairingCode != selfCode }.distinctBy { it.pairingCode }
+        Log.d("CctvRepository", "Found ${filtered.size} unique paired devices for user: $user")
         _pairedDevices.value = filtered
         if (_selectedCameraId.value.isBlank() && filtered.isNotEmpty()) {
             _selectedCameraId.value = filtered.first().id
