@@ -292,8 +292,8 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                 motionAnalyzer = if (dev.motionGuardEnabled) motionDetector else null,
                 useFrontLens = dev.lensFacingFront
             )
-        } catch (e: Exception) {
-            Log.e("CctvViewModel", "Failed to bind camera to preview: ${e.message}", e)
+        } catch (t: Throwable) {
+            com.example.cctv.util.DebugLogger.e("CctvViewModel", "Failed to bind camera to preview: ${t.message}", t)
         }
     }
 
@@ -304,13 +304,24 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         try {
             val dev = currentDevice.value
-            udpStreamManager.startSender()
+            try {
+                udpStreamManager.startSender()
+            } catch (t: Throwable) {
+                com.example.cctv.util.DebugLogger.w("CctvViewModel", "UDP Sender start warning: ${t.message}", t)
+            }
+
             if (_isHardwareEncoding.value) {
-                val started = hardwareEncoder.start()
-                if (!started) {
+                try {
+                    val started = hardwareEncoder.start()
+                    if (!started) {
+                        _isHardwareEncoding.value = false
+                    }
+                } catch (t: Throwable) {
+                    com.example.cctv.util.DebugLogger.w("CctvViewModel", "Hardware encoder start warning: ${t.message}", t)
                     _isHardwareEncoding.value = false
                 }
             }
+
             videoRecordingManager.startCameraWithRecorder(
                 context = context,
                 lifecycleOwner = lifecycleOwner,
@@ -318,8 +329,8 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                 useFrontLens = dev.lensFacingFront,
                 frameAnalyzer = createFrameAnalyzer()
             )
-        } catch (e: Exception) {
-            Log.e("CctvViewModel", "Failed to bind camera with recorder: ${e.message}", e)
+        } catch (t: Throwable) {
+            com.example.cctv.util.DebugLogger.e("CctvViewModel", "Failed to bind camera with recorder: ${t.message}", t)
         }
     }
 
@@ -560,8 +571,8 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 context.startService(serviceIntent)
             }
-        } catch (e: Exception) {
-            Log.e("CctvViewModel", "Failed to start foreground service: ${e.message}", e)
+        } catch (t: Throwable) {
+            com.example.cctv.util.DebugLogger.e("CctvViewModel", "Failed to start foreground service: ${t.message}", t)
         }
     }
 

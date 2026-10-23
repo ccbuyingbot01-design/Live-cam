@@ -53,8 +53,8 @@ class LiveKitManager(private val context: Context) {
     } else {
         try {
             LiveKit.create(context)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize LiveKit room instance", e)
+        } catch (t: Throwable) {
+            com.example.cctv.util.DebugLogger.e(TAG, "Failed to initialize LiveKit room instance", t)
             null
         }
     }
@@ -123,15 +123,18 @@ class LiveKitManager(private val context: Context) {
 
         return try {
             val r = room ?: run {
-                room = try { LiveKit.create(context) } catch (_: Exception) { null }
+                room = try { LiveKit.create(context) } catch (t: Throwable) {
+                    com.example.cctv.util.DebugLogger.e(TAG, "Failed to create LiveKit room in connectAsSender", t)
+                    null
+                }
                 room ?: return false
             }
 
             if (isConnectedOrConnecting() || r.state != Room.State.DISCONNECTED) {
                 Log.d(TAG, "Disconnecting previous LiveKit session before connecting as sender...")
-                try { r.release() } catch (_: Exception) {}
-                try { r.disconnect() } catch (_: Exception) {}
-                room = try { LiveKit.create(context) } catch (_: Exception) { r }
+                try { r.release() } catch (_: Throwable) {}
+                try { r.disconnect() } catch (_: Throwable) {}
+                room = try { LiveKit.create(context) } catch (_: Throwable) { r }
             }
 
             val activeRoom = room ?: return false
@@ -150,7 +153,11 @@ class LiveKitManager(private val context: Context) {
             _isReconnecting.value = false
 
             val localParticipant = activeRoom.localParticipant
-            localParticipant.setMicrophoneEnabled(true)
+            try {
+                localParticipant.setMicrophoneEnabled(true)
+            } catch (t: Throwable) {
+                com.example.cctv.util.DebugLogger.w(TAG, "Microphone enable warning: ${t.message}", t)
+            }
 
             val capturer = BitmapFrameCapturer()
             bitmapCapturer = capturer
@@ -163,8 +170,8 @@ class LiveKitManager(private val context: Context) {
 
             Log.i(TAG, "Successfully published CameraX LiveKit WebRTC video track to LiveKit Cloud!")
             true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to connect LiveKit Sender", e)
+        } catch (e: Throwable) {
+            com.example.cctv.util.DebugLogger.e(TAG, "Failed to connect LiveKit Sender: ${e.message}", e)
             _isConnected.value = false
             bitmapCapturer = null
             customVideoTrack = null
