@@ -102,7 +102,11 @@ fun CameraPreviewOverlay(
     LaunchedEffect(device.lensFacingFront) {
         boundPreviewView?.let { pv ->
             pv.post {
-                viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
+                try {
+                    viewModel.bindCameraWithRecorder(context, lifecycleOwner, pv)
+                } catch (e: Exception) {
+                    android.util.Log.e("CameraPreviewOverlay", "Camera re-bind error on lens switch: ${e.message}", e)
+                }
             }
         }
     }

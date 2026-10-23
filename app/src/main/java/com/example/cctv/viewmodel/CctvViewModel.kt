@@ -281,16 +281,20 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         lifecycleOwner: LifecycleOwner,
         previewView: PreviewView
     ) {
-        val dev = currentDevice.value
-        motionDetector.updateSensitivity(dev.motionSensitivity)
+        try {
+            val dev = currentDevice.value
+            motionDetector.updateSensitivity(dev.motionSensitivity)
 
-        cameraManager.startCamera(
-            context = context,
-            lifecycleOwner = lifecycleOwner,
-            previewView = previewView,
-            motionAnalyzer = if (dev.motionGuardEnabled) motionDetector else null,
-            useFrontLens = dev.lensFacingFront
-        )
+            cameraManager.startCamera(
+                context = context,
+                lifecycleOwner = lifecycleOwner,
+                previewView = previewView,
+                motionAnalyzer = if (dev.motionGuardEnabled) motionDetector else null,
+                useFrontLens = dev.lensFacingFront
+            )
+        } catch (e: Exception) {
+            Log.e("CctvViewModel", "Failed to bind camera to preview: ${e.message}", e)
+        }
     }
 
     fun bindCameraWithRecorder(
@@ -298,21 +302,25 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         lifecycleOwner: LifecycleOwner,
         previewView: PreviewView
     ) {
-        val dev = currentDevice.value
-        udpStreamManager.startSender()
-        if (_isHardwareEncoding.value) {
-            val started = hardwareEncoder.start()
-            if (!started) {
-                _isHardwareEncoding.value = false
+        try {
+            val dev = currentDevice.value
+            udpStreamManager.startSender()
+            if (_isHardwareEncoding.value) {
+                val started = hardwareEncoder.start()
+                if (!started) {
+                    _isHardwareEncoding.value = false
+                }
             }
+            videoRecordingManager.startCameraWithRecorder(
+                context = context,
+                lifecycleOwner = lifecycleOwner,
+                previewView = previewView,
+                useFrontLens = dev.lensFacingFront,
+                frameAnalyzer = createFrameAnalyzer()
+            )
+        } catch (e: Exception) {
+            Log.e("CctvViewModel", "Failed to bind camera with recorder: ${e.message}", e)
         }
-        videoRecordingManager.startCameraWithRecorder(
-            context = context,
-            lifecycleOwner = lifecycleOwner,
-            previewView = previewView,
-            useFrontLens = dev.lensFacingFront,
-            frameAnalyzer = createFrameAnalyzer()
-        )
     }
 
     /**
@@ -543,13 +551,17 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     // ── Foreground Service ────────────────────────────────────────────────────
 
     fun startForegroundCctvService(context: Context) {
-        val serviceIntent = Intent(context, CctvForegroundService::class.java).apply {
-            action = CctvForegroundService.ACTION_START
-        }
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
-        } else {
-            context.startService(serviceIntent)
+        try {
+            val serviceIntent = Intent(context, CctvForegroundService::class.java).apply {
+                action = CctvForegroundService.ACTION_START
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            Log.e("CctvViewModel", "Failed to start foreground service: ${e.message}", e)
         }
     }
 
