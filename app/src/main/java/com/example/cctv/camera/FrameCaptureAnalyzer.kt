@@ -73,10 +73,7 @@ class FrameCaptureAnalyzer(
             }
             lastCaptureTime = now
 
-            val sourceBitmap = try {
-                image.toBitmap()
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to convert ImageProxy to Bitmap: ${e.message}")
+            val sourceBitmap = imageProxyToBitmap(image) ?: run {
                 image.close()
                 return
             }
@@ -167,9 +164,6 @@ class FrameCaptureAnalyzer(
                 }
             }
 
-            // DO NOT call .recycle() on bitmaps that are used asynchronously or shared!
-            // Garbage collector will manage memory safely.
-
         } catch (e: Exception) {
             Log.e(TAG, "Frame capture error", e)
         } finally {
@@ -177,6 +171,71 @@ class FrameCaptureAnalyzer(
                 image.close()
             } catch (_: Exception) {}
         }
+    }
+
+    private fun imageProxyToBitmap(image: ImageProxy): Bitmap? {
+        return try {
+            image.toBitmap()
+        } catch (e: Exception) {
+            try {
+                if (image.format == android.graphics.ImageFormat.YUV_420_888) {
+                    val nv21 = yuv420ToNv21(image)
+                    val yuvImage = android.graphics.YuvImage(
+                        nv21,
+                        android.graphics.ImageFormat.NV21,
+                        image.width,
+                        image.height,
+                        null
+                    )
+                    val out = ByteArrayOutputStream()
+                    yuvImage.compressToJpeg(android.graphics.Rect(0, 0, image.width, image.height), 80, out)
+                    val imageBytes = out.toByteArray()
+                    BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                } else {
+                    null
+                }
+            } catch (ex: Exception) {
+                Log.e(TAG, "YUV fallback conversion error: ${ex.message}")
+                null
+            }
+        }
+    }
+
+    private fun yuv420ToNv21(image: ImageProxy): ByteArray {
+        val yBuffer = image.planes[0].buffer
+        val uBuffer = image.planes[1].buffer
+        val vBuffer = image.planes[2].buffer
+
+        val ySize = yBuffer.remaining()
+        val uSize = uBuffer.remaining()
+        val vSize = vBuffer.remaining()
+
+        val nv21 = ByteArray(ySize + image.width * image.height / 2)
+
+        yBuffer.get(nv21, 0, ySize)
+
+        val vRowStride = image.planes[2].rowStride
+        val vPixelStride = image.planes[2].pixelStride
+        val uRowStride = image.planes[1].rowStride
+        val uPixelStride = image.planes[1].pixelStride
+
+        val width = image.width
+        val height = image.height
+
+        var nvIndex = ySize
+        for (row in 0 until height / 2) {
+            for (col in 0 until width / 2) {
+                val vIndex = row * vRowStride + col * vPixelStride
+                val uIndex = row * uRowStride + col * uPixelStride
+                if (vIndex < vSize) {
+                    nv21[nvIndex++] = vBuffer.get(vIndex)
+                }
+                if (uIndex < uSize) {
+                    nv21[nvIndex++] = uBuffer.get(uIndex)
+                }
+            }
+        }
+        return nv21
     }
 
     private fun scaleBitmap(bitmap: Bitmap, maxDim: Int): Bitmap {

@@ -1,5 +1,0 @@
-{
-  "summary":  "Supabase SQL Cleanup Script to remove duplicate paired devices and enforce unique constraint on (username, pairing_code).",
-  "updatedAt":  "2026-10-23T11:45:06.823856576Z",
-  "userFacing":  true
-}

@@ -167,13 +167,14 @@ class CctvForegroundService : Service() {
                 val hasMicPerm = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
                 var fgsType = 0
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasCameraPerm) {
-                    fgsType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-                    if (hasMicPerm) {
-                        fgsType = fgsType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                    }
+                if (hasCameraPerm) {
+                    fgsType = fgsType or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
                 }
-                if (fgsType != 0 && Build.VERSION.SDK_INT < 34) {
+                if (hasMicPerm) {
+                    fgsType = fgsType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                }
+
+                if (fgsType != 0) {
                     startForeground(NOTIFICATION_ID, notification, fgsType)
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
@@ -183,7 +184,7 @@ class CctvForegroundService : Service() {
             }
             Log.i(TAG, "Foreground surveillance service started successfully.")
         } catch (e: Exception) {
-            Log.e(TAG, "startForeground error, falling back to standard startForeground", e)
+            Log.e(TAG, "startForeground error", e)
             try {
                 startForeground(NOTIFICATION_ID, notification)
             } catch (inner: Exception) {
