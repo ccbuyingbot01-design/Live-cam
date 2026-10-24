@@ -92,17 +92,27 @@ class MainActivity : ComponentActivity() {
     ) { permissions ->
         val cameraGranted = permissions[Manifest.permission.CAMERA] ?: false
         if (cameraGranted) {
-            viewModel.startForegroundCctvService(this)
+            try {
+                viewModel.startForegroundCctvService(this)
+            } catch (e: Throwable) {
+                DebugLogger.w("MainActivity", "Failed to start foreground service on launcher result", e)
+            }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        try {
+            enableEdgeToEdge()
+        } catch (e: Throwable) {
+            DebugLogger.w("MainActivity", "enableEdgeToEdge fallback", e)
+        }
 
         // Initialize global DebugLogger to capture all errors & uncaught crashes
-        DebugLogger.init(applicationContext)
-        DebugLogger.i("MainActivity", "App started. Debug console active on all screens.")
+        try {
+            DebugLogger.init(applicationContext)
+            DebugLogger.i("MainActivity", "App started. Debug console active on all screens.")
+        } catch (_: Throwable) {}
 
         requestInitialPermissions()
 

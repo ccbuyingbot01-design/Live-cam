@@ -203,17 +203,22 @@ fun AuthScreen(
                         errorMessage = null
 
                         scope.launch {
-                            val result = viewModel.supabaseService.signUpOrLogin(username, password)
-                            isLoading = false
-                            result.fold(
-                                onSuccess = { user ->
-                                    viewModel.setSupabaseUser(user)
-                                    onAuthSuccess(user)
-                                },
-                                onFailure = {
-                                    errorMessage = it.message ?: "Login failed. Check your connection."
-                                }
-                            )
+                            try {
+                                val result = viewModel.supabaseService.signUpOrLogin(username, password)
+                                isLoading = false
+                                result.fold(
+                                    onSuccess = { user ->
+                                        viewModel.setSupabaseUser(user)
+                                        onAuthSuccess(user)
+                                    },
+                                    onFailure = {
+                                        errorMessage = it.message ?: "Login failed. Check your connection."
+                                    }
+                                )
+                            } catch (e: Throwable) {
+                                isLoading = false
+                                errorMessage = "Login error: ${e.localizedMessage ?: "Connection error"}"
+                            }
                         }
                     },
                     enabled = !isLoading,
