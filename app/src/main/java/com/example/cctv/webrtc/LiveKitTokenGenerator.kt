@@ -13,23 +13,9 @@ import javax.crypto.spec.SecretKeySpec
  */
 object LiveKitTokenGenerator {
 
-    val LIVEKIT_CLOUD_URL: String
-        get() {
-            val url = try { com.example.BuildConfig.LIVEKIT_URL } catch (_: Throwable) { null }
-            return if (url.isNullOrBlank() || url == "MY_LIVEKIT_URL") "wss://live-cam-g2een99y.livekit.cloud" else url
-        }
-
-    val LIVEKIT_API_KEY: String
-        get() {
-            val key = try { com.example.BuildConfig.LIVEKIT_API_KEY } catch (_: Throwable) { null }
-            return if (key.isNullOrBlank() || key == "MY_LIVEKIT_API_KEY") "APIoUizemAhL4XR" else key
-        }
-
-    val LIVEKIT_API_SECRET: String
-        get() {
-            val secret = try { com.example.BuildConfig.LIVEKIT_API_SECRET } catch (_: Throwable) { null }
-            return if (secret.isNullOrBlank() || secret == "MY_LIVEKIT_API_SECRET") "OmqL8hsDwstYmL4s4ObjoEs0ox32DsoSx910q24wyCM" else secret
-        }
+    const val LIVEKIT_CLOUD_URL: String = "wss://live-cam-g2een99y.livekit.cloud"
+    const val LIVEKIT_API_KEY: String = "APIoUizemAhL4XR"
+    const val LIVEKIT_API_SECRET: String = "OmqL8hsDwstYmL4s4ObjoEs0ox32DsoSx910q24wyCM"
 
     fun generateAccessToken(
         roomName: String,

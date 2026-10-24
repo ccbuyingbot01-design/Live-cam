@@ -305,25 +305,21 @@ fun ViewerModeScreen(
                         val displayBitmap = liveStreamBitmap
                         var forceCellularJpegFallback by remember { mutableStateOf(false) }
 
+                        val useLiveKitTrack = liveKitVideoTrack != null && !forceCellularJpegFallback
+
                         if (liveKitVideoTrack != null || displayBitmap != null) {
-                            // Base layer: render JPEG stream bitmap whenever available (ensures video on SIM mobile networks)
-                            if (displayBitmap != null) {
+                            if (useLiveKitTrack) {
+                                com.example.cctv.ui.components.LiveKitVideoRenderer(
+                                    videoTrack = liveKitVideoTrack,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else if (displayBitmap != null) {
                                 androidx.compose.foundation.Image(
                                     bitmap = displayBitmap.asImageBitmap(),
                                     contentDescription = "Live Camera Feed",
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
                                 )
-                            }
-
-                            // Overlay layer: LiveKit WebRTC Video Track (if active and not forced to SIM fallback)
-                            if (liveKitVideoTrack != null && !forceCellularJpegFallback) {
-                                if (!isFullScreen) {
-                                    com.example.cctv.ui.components.LiveKitVideoRenderer(
-                                        videoTrack = liveKitVideoTrack,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                }
                             }
 
                             MotionHeatmapOverlay(
