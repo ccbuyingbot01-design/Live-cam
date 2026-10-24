@@ -64,6 +64,8 @@ class FrameCaptureAnalyzer(
         maxDimension = targetMaxDim
     }
 
+    private var lastBase64Time = 0L
+
     override fun analyze(image: ImageProxy) {
         try {
             val now = System.currentTimeMillis()
@@ -90,43 +92,50 @@ class FrameCaptureAnalyzer(
                 sourceBitmap
             }
 
+            // 1. Deliver bitmap directly to LiveKit / renderer with zero delay
             try {
                 onBitmapCaptured?.invoke(bitmap)
             } catch (e: Exception) {
                 Log.w(TAG, "onBitmapCaptured callback error", e)
             }
 
-            val out = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
-            val jpegBytes = out.toByteArray()
-
-            try {
-                onCompressedBytesCaptured?.invoke(jpegBytes)
-            } catch (e: Exception) {
-                Log.w(TAG, "onCompressedBytesCaptured callback error", e)
-            }
-
-            val scaled = scaleBitmap(bitmap, maxDimension)
-            val base64 = bitmapToBase64(scaled, jpegQuality)
-            
-            try {
-                onFrameCaptured(base64)
-            } catch (e: Exception) {
-                Log.w(TAG, "onFrameCaptured callback error", e)
-            }
-
-            // AI Human Detection Processing
-            val detector = objectDetector
-            if (onHumanDetected != null && detector != null && now - lastHumanDetectTime > 250L) {
-                lastHumanDetectTime = now
+            // 2. Local UDP Stream JPEG Bytes (only if listener attached)
+            if (onCompressedBytesCaptured != null) {
+                val out = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, jpegQuality, out)
+                val jpegBytes = out.toByteArray()
                 try {
-                    val inputImg = com.google.mlkit.vision.common.InputImage.fromBitmap(scaled, 0)
+                    onCompressedBytesCaptured.invoke(jpegBytes)
+                } catch (e: Exception) {
+                    Log.w(TAG, "onCompressedBytesCaptured callback error", e)
+                }
+            }
+
+            // 3. Supabase Cloud Base64 Fallback Frame (throttled to 1 FPS max to prevent GC allocation lag)
+            if (now - lastBase64Time >= 1000L) {
+                lastBase64Time = now
+                val scaled = scaleBitmap(bitmap, maxDimension)
+                val base64 = bitmapToBase64(scaled, jpegQuality)
+                try {
+                    onFrameCaptured(base64)
+                } catch (e: Exception) {
+                    Log.w(TAG, "onFrameCaptured callback error", e)
+                }
+            }
+
+            // 4. AI Human Detection (runs on background thread, max 2.5 FPS)
+            val detector = objectDetector
+            if (onHumanDetected != null && detector != null && now - lastHumanDetectTime > 400L) {
+                lastHumanDetectTime = now
+                val scaledForAi = scaleBitmap(bitmap, 320)
+                try {
+                    val inputImg = com.google.mlkit.vision.common.InputImage.fromBitmap(scaledForAi, 0)
                     detector.process(inputImg)
                         .addOnSuccessListener { detectedObjects ->
                             try {
                                 val results = mutableListOf<HumanDetectorAnalyzer.HumanDetectionResult>()
-                                val imgWidth = scaled.width.toFloat()
-                                val imgHeight = scaled.height.toFloat()
+                                val imgWidth = scaledForAi.width.toFloat()
+                                val imgHeight = scaledForAi.height.toFloat()
 
                                 for (obj in detectedObjects) {
                                     val box = obj.boundingBox

@@ -29,7 +29,8 @@ fun LiveKitVideoRenderer(
     if (videoTrack == null) return
 
     val context = LocalContext.current
-    val eglBase = remember {
+
+    val eglBase = remember(videoTrack) {
         try {
             EglBase.create(null, EglBase.CONFIG_PLAIN)
         } catch (e: Exception) {
@@ -38,7 +39,7 @@ fun LiveKitVideoRenderer(
         }
     }
 
-    val renderer = remember(context) {
+    val renderer = remember(videoTrack) {
         TextureViewRenderer(context).apply {
             try {
                 init(eglBase.eglBaseContext, null)
@@ -81,3 +82,4 @@ fun LiveKitVideoRenderer(
         modifier = modifier.fillMaxSize()
     )
 }
+

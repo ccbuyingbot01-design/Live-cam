@@ -49,11 +49,11 @@ class AiBatteryOptimizer(private val context: Context) {
         const val DEFAULT_LOW_POWER_THRESHOLD = 40
 
         val PROFILE_HIGH_PERFORMANCE = StreamingPerformanceProfile(
-            targetFps = 15,
-            jpegQuality = 30,
-            maxDimension = 320,
-            cloudSyncIntervalMs = 1500L,
-            description = "Standard Surveillance (15 FPS • 320p)"
+            targetFps = 30,
+            jpegQuality = 35,
+            maxDimension = 360,
+            cloudSyncIntervalMs = 1200L,
+            description = "High Performance Surveillance (30 FPS • 360p)"
         )
 
         val PROFILE_LOW_POWER_ACTIVE = StreamingPerformanceProfile(
