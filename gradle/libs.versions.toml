@@ -101,7 +101,7 @@ googleid = { group = "com.google.android.libraries.identity.googleid", name = "g
 webrtc = { group = "io.getstream", name = "stream-webrtc-android", version.ref = "webrtc" }
 androidx-camera-mlkit = { group = "androidx.camera", name = "camera-mlkit", version.ref = "cameraMlkit" }
 mlkit-object-detection = { group = "com.google.mlkit", name = "object-detection", version.ref = "objectDetection" }
-livekit-android = { group = "io.livekit", name = "livekit-android", version = "2.11.0" }
+livekit-android = { group = "io.livekit", name = "livekit-android", version = "2.14.0" }
 
 
 [plugins]

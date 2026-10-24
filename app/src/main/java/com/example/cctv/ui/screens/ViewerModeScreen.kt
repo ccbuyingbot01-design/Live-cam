@@ -129,6 +129,8 @@ fun ViewerModeScreen(
     val liveKitReconnectAttempt by viewModel.liveKitReconnectAttempt.collectAsState()
     val networkType by viewModel.networkType.collectAsState()
     val isWifiNetwork by viewModel.isWifiNetwork.collectAsState()
+    val liveKitConnectionLogs by viewModel.liveKitConnectionLogs.collectAsState()
+    var showLiveKitLogs by remember { mutableStateOf(false) }
 
     var showHeatmap by remember { mutableStateOf(true) }
     var isTimelineOpen by remember { mutableStateOf(false) }
@@ -316,6 +318,7 @@ fun ViewerModeScreen(
                             if (useLiveKitTrack) {
                                 com.example.cctv.ui.components.LiveKitVideoRenderer(
                                     videoTrack = liveKitVideoTrack,
+                                    room = viewModel.liveKitManager.room,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             } else if (displayBitmap != null) {
@@ -394,10 +397,9 @@ fun ViewerModeScreen(
                                 ) {
                                     Text(
                                         text = when {
-                                            liveKitReconnecting -> "🔄 RECONNECTING (#$liveKitReconnectAttempt)... TAP TO RETRY"
-                                            forceCellularJpegFallback -> "● SIM DATA FEED (JPEG) | TAP FOR WEBRTC"
-                                            liveKitVideoTrack != null -> "● LIVEKIT WebRTC | TAP FOR SIM FEED"
-                                            else -> "● CELLULAR FEED | $liveKitHealthStatus"
+                                            liveKitReconnecting -> "🔄 RECONNECTING LIVEKIT (#$liveKitReconnectAttempt)... TAP TO RETRY"
+                                            liveKitVideoTrack != null -> "● LIVEKIT CLOUD WebRTC STREAMING | $liveKitHealthStatus"
+                                            else -> "● LIVEKIT CLOUD CONNECTING... | $liveKitHealthStatus"
                                         },
                                         color = Color.Black,
                                         fontSize = 10.sp,
@@ -428,22 +430,37 @@ fun ViewerModeScreen(
                             }
                         } else {
                             Column(
-                                modifier = Modifier.fillMaxSize(),
+                                modifier = Modifier.fillMaxSize().padding(16.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.VideocamOff,
-                                    contentDescription = "No Feed",
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(48.dp)
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    color = NeonCyanPrimary,
+                                    strokeWidth = 3.dp,
+                                    modifier = Modifier.size(36.dp)
                                 )
-                                Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
                                 Text(
-                                    text = "Connecting to Live Stream...",
-                                    color = TextSecondary,
-                                    fontSize = 13.sp
+                                    text = "Connecting to Live Camera Stream...",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
+                                Text(
+                                    text = "LiveKit Status: $liveKitHealthStatus",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                androidx.compose.material3.Button(
+                                    onClick = { viewModel.forceReconnectLiveKit() },
+                                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = NeonCyanPrimary.copy(alpha = 0.25f)),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyanPrimary),
+                                    shape = RoundedCornerShape(20.dp)
+                                ) {
+                                    Text("🔄 Retry LiveKit Stream", color = NeonCyanPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -458,6 +475,82 @@ fun ViewerModeScreen(
                     onToggleNightVision = { viewModel.toggleNightVisionRemote(activeCamera.id) },
                     onToggleRecording = { viewModel.startRecordingRemote(activeCamera.id) }
                 )
+
+                // LiveKit Connection Debug Logs Card
+                androidx.compose.material3.Card(
+                    colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color(0xFF121829)),
+                    shape = RoundedCornerShape(16.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth().testTag("livekit_debug_logs_card")
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showLiveKitLogs = !showLiveKitLogs },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Debug Logs",
+                                    tint = Color(0xFF00E5FF),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "LiveKit Connection Debug Logs (${liveKitConnectionLogs.size})",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            Text(
+                                text = if (showLiveKitLogs) "▲ HIDE" else "▼ SHOW",
+                                color = Color(0xFF00E5FF),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        if (showLiveKitLogs) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(180.dp)
+                                    .background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                                    .padding(8.dp)
+                            ) {
+                                val scrollStateLogs = rememberScrollState()
+                                LaunchedEffect(liveKitConnectionLogs.size) {
+                                    scrollStateLogs.animateScrollTo(scrollStateLogs.maxValue)
+                                }
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(scrollStateLogs),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    liveKitConnectionLogs.forEach { logLine ->
+                                        val isError = logLine.contains("ERROR", ignoreCase = true) || logLine.contains("FATAL", ignoreCase = true)
+                                        Text(
+                                            text = logLine,
+                                            color = if (isError) Color(0xFFFF3D00) else Color(0xFF00E676),
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Real-Time Live AI Feeds & Threat Copilot Card
                 RealTimeAiFeedsCard(

@@ -68,6 +68,20 @@ class LiveKitManager(private val context: Context) {
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
+    private val _connectionLogs = MutableStateFlow<List<String>>(listOf("[00:00:00] LiveKitManager initialized."))
+    val connectionLogs: StateFlow<List<String>> = _connectionLogs.asStateFlow()
+
+    fun logConnectionStep(msg: String) {
+        val timestamped = "[${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}] $msg"
+        Log.d("LiveKitDebug", timestamped)
+        val currentList = _connectionLogs.value.toMutableList()
+        currentList.add(timestamped)
+        if (currentList.size > 80) {
+            currentList.removeAt(0)
+        }
+        _connectionLogs.value = currentList
+    }
+
     private val _isReconnecting = MutableStateFlow(false)
     val isReconnecting: StateFlow<Boolean> = _isReconnecting.asStateFlow()
 
@@ -102,7 +116,6 @@ class LiveKitManager(private val context: Context) {
      * Capped at ~30 FPS (33ms) for silk-smooth ultra-low latency (<200ms) live streaming.
      */
     fun pushBitmapFrame(bitmap: Bitmap, rotation: Int = 0) {
-        if (!_isConnected.value && !_isReconnecting.value) return
         val capturer = bitmapCapturer ?: return
         val now = System.currentTimeMillis()
         if (now - lastFramePushTime < 33L) return // Cap at 30 FPS for smooth streaming
@@ -121,7 +134,16 @@ class LiveKitManager(private val context: Context) {
                 bitmap
             }
 
-            capturer.pushBitmap(frameToPush, rotation)
+            // Software readable bitmap required by WebRTC C++ encoder
+            val safeBitmap = if (frameToPush.config == Bitmap.Config.HARDWARE) {
+                frameToPush.copy(Bitmap.Config.ARGB_8888, false)
+            } else {
+                frameToPush
+            }
+
+            if (safeBitmap != null) {
+                capturer.pushBitmap(safeBitmap, rotation)
+            }
         } catch (e: Exception) {
             Log.w(TAG, "pushBitmapFrame error on cellular stream", e)
         }
@@ -137,7 +159,7 @@ class LiveKitManager(private val context: Context) {
         scope: CoroutineScope? = null
     ): Boolean = connectMutex.withLock {
         val currentRoom = room ?: run {
-            Log.e(TAG, "LiveKit room unavailable on this device.")
+            logConnectionStep("ERROR: LiveKit room unavailable on this device.")
             return@withLock false
         }
         if (scope != null) externalScope = scope
@@ -152,34 +174,41 @@ class LiveKitManager(private val context: Context) {
         return try {
             if (isConnectedOrConnecting()) {
                 if (currentRoom.state == Room.State.CONNECTED && lastRoomName == normalizedRoom && lastIsSender == true) {
-                    Log.d(TAG, "Already connected as sender to room $normalizedRoom")
+                    logConnectionStep("Already connected as sender to room $normalizedRoom")
                     return true
                 }
-                Log.d(TAG, "Resetting previous session before connecting as sender...")
+                logConnectionStep("Resetting previous session before connecting as sender...")
                 try { currentRoom.disconnect() } catch (_: Throwable) {}
             }
 
+            logConnectionStep("Generating JWT Token for sender (room: $normalizedRoom, identity: $identity)...")
             val token = LiveKitTokenGenerator.generateAccessToken(
                 roomName = normalizedRoom,
                 identity = identity,
                 isPublisher = true
             )
 
-            Log.i(TAG, "Connecting Camera Sender to LiveKit Cloud ($wsUrl, room: $normalizedRoom)...")
+            logConnectionStep("Connecting Camera Sender to LiveKit Cloud ($wsUrl, room: $normalizedRoom)...")
             currentRoom.connect(wsUrl, token)
             _isConnected.value = true
             _isReconnecting.value = false
             _reconnectAttempt.value = 0
             _streamHealthStatus.value = "EXCELLENT (<300ms)"
+            logConnectionStep("WebSocket handshake established for Camera Sender in room $normalizedRoom!")
 
             val localParticipant = currentRoom.localParticipant
             try {
                 localParticipant.setMicrophoneEnabled(true)
             } catch (e: Throwable) {
-                Log.w(TAG, "Microphone enable warning: ${e.message}")
+                logConnectionStep("Microphone enable warning: ${e.message}")
             }
 
             val capturer = BitmapFrameCapturer()
+            try {
+                capturer.startCapture(640, 480, 30)
+            } catch (e: Throwable) {
+                logConnectionStep("capturer startCapture info: ${e.message}")
+            }
             bitmapCapturer = capturer
             val videoTrack = localParticipant.createVideoTrack(
                 name = "camera",
@@ -188,9 +217,10 @@ class LiveKitManager(private val context: Context) {
             customVideoTrack = videoTrack
             localParticipant.publishVideoTrack(videoTrack)
 
-            Log.i(TAG, "Published smooth CameraX LiveKit WebRTC video track to LiveKit Cloud!")
+            logConnectionStep("Published smooth CameraX LiveKit WebRTC video track successfully to LiveKit Cloud room $normalizedRoom!")
             true
         } catch (e: Throwable) {
+            logConnectionStep("FATAL ERROR: Failed to connect LiveKit Sender: ${e.message}")
             Log.e(TAG, "Failed to connect LiveKit Sender", e)
             _isConnected.value = false
             _streamHealthStatus.value = "CONNECTION ERROR"
@@ -211,7 +241,7 @@ class LiveKitManager(private val context: Context) {
         onVideoTrackSubscribed: (VideoTrack) -> Unit = {}
     ): Boolean = connectMutex.withLock {
         val currentRoom = room ?: run {
-            Log.e(TAG, "LiveKit room unavailable on this device.")
+            logConnectionStep("ERROR: LiveKit room unavailable on this device.")
             return@withLock false
         }
         externalScope = scope
@@ -227,33 +257,34 @@ class LiveKitManager(private val context: Context) {
         return try {
             if (isConnectedOrConnecting()) {
                 if (currentRoom.state == Room.State.CONNECTED && lastRoomName == normalizedRoom && lastIsSender == false) {
-                    Log.d(TAG, "Already connected as viewer to room $normalizedRoom")
+                    logConnectionStep("Already connected as viewer to room $normalizedRoom")
                     return true
                 }
-                Log.d(TAG, "Resetting session before connecting as viewer...")
+                logConnectionStep("Resetting previous session before connecting as viewer...")
                 try { currentRoom.disconnect() } catch (_: Throwable) {}
             }
 
+            logConnectionStep("Generating JWT Token for viewer (room: $normalizedRoom, identity: $identity)...")
             val token = LiveKitTokenGenerator.generateAccessToken(
                 roomName = normalizedRoom,
                 identity = identity,
                 isPublisher = false
             )
 
-            Log.i(TAG, "Connecting Viewer to LiveKit Cloud ($wsUrl, room: $normalizedRoom)...")
+            logConnectionStep("Connecting Viewer Monitor to LiveKit Cloud ($wsUrl, room: $normalizedRoom)...")
 
             eventsJob?.cancel()
             eventsJob = scope.launch(Dispatchers.IO) {
                 currentRoom.events.collect { event ->
                     when (event) {
                         is RoomEvent.ParticipantConnected -> {
-                            Log.i(TAG, "Remote participant connected: ${event.participant.identity}. Checking tracks...")
+                            logConnectionStep("Remote participant connected: ${event.participant.identity}. Checking tracks...")
                             checkExistingTracks(onVideoTrackSubscribed)
                         }
                         is RoomEvent.TrackSubscribed -> {
                             val track = event.track
                             if (track is VideoTrack) {
-                                Log.i(TAG, "Subscribed to remote LiveKit video track: ${track.name}")
+                                logConnectionStep("Successfully subscribed to remote LiveKit video track: ${track.name} from room $normalizedRoom")
                                 lastTrackReceivedTime = System.currentTimeMillis()
                                 _remoteVideoTrack.value = track
                                 _streamHealthStatus.value = "EXCELLENT (<300ms)"
@@ -263,6 +294,7 @@ class LiveKitManager(private val context: Context) {
                         is RoomEvent.TrackPublished -> {
                             val track = event.publication.track
                             if (track is VideoTrack) {
+                                logConnectionStep("Track published event received for video track: ${track.name}")
                                 lastTrackReceivedTime = System.currentTimeMillis()
                                 _remoteVideoTrack.value = track
                                 _streamHealthStatus.value = "EXCELLENT (<300ms)"
@@ -271,21 +303,30 @@ class LiveKitManager(private val context: Context) {
                                 checkExistingTracks(onVideoTrackSubscribed)
                             }
                         }
+                        is RoomEvent.TrackUnsubscribed -> {
+                            val track = event.track
+                            if (track is VideoTrack) {
+                                logConnectionStep("Track unsubscribed: ${track.name}")
+                                if (_remoteVideoTrack.value == track) {
+                                    _remoteVideoTrack.value = null
+                                }
+                            }
+                        }
                         is RoomEvent.Reconnecting -> {
-                            Log.w(TAG, "LiveKit room reconnecting due to network shift...")
+                            logConnectionStep("Network shift detected! LiveKit room reconnecting...")
                             _isReconnecting.value = true
                             _streamHealthStatus.value = "NETWORK SHIFT - RECONNECTING..."
                         }
                         is RoomEvent.Reconnected -> {
-                            Log.i(TAG, "LiveKit room reconnected successfully!")
+                            logConnectionStep("LiveKit room reconnected successfully after network shift! Forcing track re-subscription...")
                             _isReconnecting.value = false
                             _isConnected.value = true
                             _reconnectAttempt.value = 0
                             _streamHealthStatus.value = "EXCELLENT (<300ms)"
-                            checkExistingTracks(onVideoTrackSubscribed)
+                            forceRefreshVideoTrack()
                         }
                         is RoomEvent.Disconnected -> {
-                            Log.w(TAG, "Disconnected from LiveKit room")
+                            logConnectionStep("Disconnected from LiveKit room $normalizedRoom.")
                             _isConnected.value = false
                             _streamHealthStatus.value = "DISCONNECTED"
                         }
@@ -299,11 +340,12 @@ class LiveKitManager(private val context: Context) {
             _isReconnecting.value = false
             _reconnectAttempt.value = 0
             _streamHealthStatus.value = "EXCELLENT (<300ms)"
-            Log.i(TAG, "Connected to LiveKit Cloud room as Viewer.")
+            logConnectionStep("Connected to LiveKit Cloud room $normalizedRoom as Viewer successfully.")
 
-            checkExistingTracks(onVideoTrackSubscribed)
+            forceRefreshVideoTrack()
             true
         } catch (e: Throwable) {
+            logConnectionStep("FATAL ERROR: Failed to connect LiveKit Viewer: ${e.message}")
             Log.e(TAG, "Failed to connect LiveKit Viewer", e)
             _isConnected.value = false
             _streamHealthStatus.value = "CONNECTION ERROR"
@@ -311,38 +353,62 @@ class LiveKitManager(private val context: Context) {
         }
     }
 
-    private fun checkExistingTracks(onVideoTrackSubscribed: (VideoTrack) -> Unit) {
+    fun forceRefreshVideoTrack() {
         val currentRoom = room ?: return
         try {
-            for ((_, participant) in currentRoom.remoteParticipants) {
-                for ((publication, track) in participant.videoTrackPublications) {
-                    val videoTrack = track ?: publication.track
-                    if (videoTrack is VideoTrack) {
-                        Log.i(TAG, "Found existing remote LiveKit video track from ${participant.identity}")
+            val participants = currentRoom.remoteParticipants
+            if (participants.isEmpty()) {
+                Log.d(TAG, "forceRefreshVideoTrack: No remote participants connected to room '${currentRoom.name}'.")
+                return
+            }
+
+            logConnectionStep("Checking ${participants.size} remote participant(s) for active video tracks...")
+            for ((_, participant) in participants) {
+                val publications = participant.videoTrackPublications
+                Log.d(TAG, "Participant ${participant.identity} has ${publications.size} video publication(s)")
+                for ((_, publication) in publications) {
+                    val remotePub = publication as? io.livekit.android.room.track.RemoteTrackPublication
+                    if (remotePub != null && !remotePub.subscribed) {
+                        try {
+                            remotePub.setSubscribed(true)
+                            logConnectionStep("Set remote track publication setSubscribed(true) for ${participant.identity}")
+                        } catch (e: Throwable) {
+                            Log.w(TAG, "setSubscribed error: ${e.message}")
+                        }
+                    }
+                    val videoTrack = remotePub?.track as? VideoTrack
+                    if (videoTrack != null) {
+                        logConnectionStep("Successfully bound remote video track from ${participant.identity}")
                         lastTrackReceivedTime = System.currentTimeMillis()
                         _remoteVideoTrack.value = videoTrack
                         _streamHealthStatus.value = "EXCELLENT (<300ms)"
-                        onVideoTrackSubscribed(videoTrack)
+                        savedOnTrackSubscribed?.invoke(videoTrack)
                         return
+                    } else {
+                        Log.d(TAG, "Video publication exists for ${participant.identity} but track object is null (SDK subscription pending)")
                     }
                 }
             }
         } catch (e: Throwable) {
-            Log.w(TAG, "Error checking existing tracks", e)
+            logConnectionStep("Error in forceRefreshVideoTrack: ${e.message}")
         }
+    }
+
+    private fun checkExistingTracks(onVideoTrackSubscribed: (VideoTrack) -> Unit) {
+        savedOnTrackSubscribed = onVideoTrackSubscribed
+        forceRefreshVideoTrack()
     }
 
     /**
      * Lag & Disconnection Supervisor Watchdog Loop.
-     * Continuously monitors stream health every 4 seconds. Automatically heals dropped sockets,
-     * network handovers, or frozen video streams with exponential backoff.
+     * Monitors connection state and automatically heals dropped WebSocket sockets or frozen sender frames.
      */
     private fun startWatchdogIfNeeded() {
         if (watchdogJob?.isActive == true) return
         val scope = externalScope ?: CoroutineScope(Dispatchers.IO)
         watchdogJob = scope.launch(Dispatchers.IO) {
             while (true) {
-                delay(4000L)
+                delay(6000L) // 6 second health check interval
                 val targetRoom = lastRoomName
                 val isSender = lastIsSender
                 if (targetRoom.isNullOrBlank() || isSender == null) continue
@@ -360,11 +426,6 @@ class LiveKitManager(private val context: Context) {
                     Log.w(TAG, "Watchdog detected sender frame stall (>7s). Performing soft reconnect...")
                     _streamHealthStatus.value = "STALLED - AUTO HEALING..."
                     triggerAutoReconnect()
-                }
-                // Case 3: Viewer connected but remote track missing / stalled > STALL_THRESHOLD
-                else if (!isSender && currentState == Room.State.CONNECTED && _remoteVideoTrack.value == null) {
-                    Log.d(TAG, "Watchdog checking for remote video track in active room...")
-                    savedOnTrackSubscribed?.let { checkExistingTracks(it) }
                 }
             }
         }

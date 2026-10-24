@@ -26,6 +26,7 @@ object LiveKitTokenGenerator {
         ttlSeconds: Long = 86400L // 24 hours
     ): String {
         return try {
+            android.util.Log.d("LiveKitDebug", "JWT Token generation start -> room: '$roomName', identity: '$identity', publisher: $isPublisher")
             val now = System.currentTimeMillis() / 1000L
             val exp = now + ttlSeconds
 
@@ -53,8 +54,10 @@ object LiveKitTokenGenerator {
             val payloadJson = JSONObject().apply {
                 put("iss", apiKey)
                 put("sub", identity)
+                put("iat", now)
                 put("nbf", now - 5)
                 put("exp", exp)
+                put("identity", identity)
                 put("video", videoGrant)
             }
 
@@ -65,8 +68,11 @@ object LiveKitTokenGenerator {
             val signature = hmacSha256(unsignedToken, apiSecret)
             val signatureBase64 = base64UrlEncode(signature)
 
-            "$unsignedToken.$signatureBase64"
+            val token = "$unsignedToken.$signatureBase64"
+            android.util.Log.d("LiveKitDebug", "JWT Token generated successfully (length: ${token.length})")
+            token
         } catch (e: Exception) {
+            android.util.Log.e("LiveKitDebug", "FATAL: Error generating JWT token: ${e.message}", e)
             e.printStackTrace()
             ""
         }

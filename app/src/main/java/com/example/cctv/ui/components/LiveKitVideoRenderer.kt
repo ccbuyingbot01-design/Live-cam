@@ -8,9 +8,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import io.livekit.android.LiveKit
 import io.livekit.android.renderer.TextureViewRenderer
+import io.livekit.android.room.Room
 import io.livekit.android.room.track.VideoTrack
-import livekit.org.webrtc.EglBase
 import livekit.org.webrtc.RendererCommon
 
 private const val TAG = "LiveKitVideoRenderer"
@@ -18,35 +19,37 @@ private const val TAG = "LiveKitVideoRenderer"
 /**
  * LiveKitVideoRenderer
  *
- * Renders remote LiveKit WebRTC VideoTrack directly onto a native TextureViewRenderer.
- * Uses safe CONFIG_PLAIN EGL initialization to avoid emulator EGL_BAD_ATTRIBUTE errors.
+ * Renders remote LiveKit WebRTC VideoTrack onto a native TextureViewRenderer.
+ * Initializes with LiveKit's shared EGL Context to prevent blank black screen rendering errors.
  */
 @Composable
 fun LiveKitVideoRenderer(
     videoTrack: VideoTrack?,
+    room: Room? = null,
     modifier: Modifier = Modifier
 ) {
     if (videoTrack == null) return
 
     val context = LocalContext.current
 
-    val eglBase = remember(videoTrack) {
-        try {
-            EglBase.create(null, EglBase.CONFIG_PLAIN)
-        } catch (e: Exception) {
-            Log.w(TAG, "Fallback to default EglBase.create()", e)
-            EglBase.create()
-        }
-    }
-
     val renderer = remember(videoTrack) {
         TextureViewRenderer(context).apply {
             try {
-                init(eglBase.eglBaseContext, null)
+                if (room != null) {
+                    try {
+                        room.initVideoRenderer(this)
+                    } catch (e: Throwable) {
+                        val egl = livekit.org.webrtc.EglBase.create()
+                        init(egl.eglBaseContext, null)
+                    }
+                } else {
+                    val egl = livekit.org.webrtc.EglBase.create()
+                    init(egl.eglBaseContext, null)
+                }
                 setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                 setEnableHardwareScaler(true)
             } catch (e: Exception) {
-                Log.e(TAG, "Error initializing TextureViewRenderer", e)
+                Log.e(TAG, "Error initializing TextureViewRenderer with LiveKit EGL context", e)
             }
         }
     }
@@ -54,6 +57,7 @@ fun LiveKitVideoRenderer(
     DisposableEffect(videoTrack) {
         try {
             videoTrack.addRenderer(renderer)
+            Log.i(TAG, "Successfully attached VideoTrack renderer to TextureViewRenderer!")
         } catch (e: Exception) {
             Log.e(TAG, "Error adding renderer to videoTrack", e)
         }
@@ -69,11 +73,6 @@ fun LiveKitVideoRenderer(
             } catch (e: Exception) {
                 Log.w(TAG, "Error releasing renderer", e)
             }
-            try {
-                eglBase.release()
-            } catch (e: Exception) {
-                Log.w(TAG, "Error releasing eglBase", e)
-            }
         }
     }
 
@@ -82,4 +81,3 @@ fun LiveKitVideoRenderer(
         modifier = modifier.fillMaxSize()
     )
 }
-

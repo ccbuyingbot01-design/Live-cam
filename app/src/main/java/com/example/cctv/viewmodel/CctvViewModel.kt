@@ -326,6 +326,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
     val liveKitReconnecting: StateFlow<Boolean> = liveKitManager.isReconnecting
     val liveKitHealthStatus: StateFlow<String> = liveKitManager.streamHealthStatus
     val liveKitReconnectAttempt: StateFlow<Int> = liveKitManager.reconnectAttempt
+    val liveKitConnectionLogs: StateFlow<List<String>> = liveKitManager.connectionLogs
 
     fun forceReconnectLiveKit() {
         liveKitManager.forceReconnectNow(viewModelScope)
