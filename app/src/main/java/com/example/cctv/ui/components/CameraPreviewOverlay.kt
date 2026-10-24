@@ -253,26 +253,47 @@ fun CameraPreviewOverlay(
                     )
                 }
             } else {
-                // LIVE STREAM badge
+                val networkConnectionType by viewModel.networkConnectionType.collectAsState()
+                val adaptiveProfileLabel by viewModel.adaptiveProfileLabel.collectAsState()
+
+                // LIVE STREAM & NETWORK STATUS badge
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(20.dp))
-                        .background(Color.Black.copy(alpha = 0.65f))
-                        .border(1.dp, LoveAlertRed.copy(alpha = 0.8f), RoundedCornerShape(20.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .background(Color.Black.copy(alpha = 0.75f))
+                        .border(
+                            1.dp,
+                            when (networkConnectionType) {
+                                com.example.cctv.viewmodel.CctvViewModel.NetworkConnectionState.WIFI -> Color(0xFF00E5FF)
+                                com.example.cctv.viewmodel.CctvViewModel.NetworkConnectionState.CELLULAR -> Color(0xFF00E676)
+                                else -> LoveAlertRed
+                            },
+                            RoundedCornerShape(20.dp)
+                        )
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(10.dp)
+                            .size(8.dp)
                             .clip(CircleShape)
-                            .background(LoveAlertRed.copy(alpha = pulseAlpha))
+                            .background(
+                                when (networkConnectionType) {
+                                    com.example.cctv.viewmodel.CctvViewModel.NetworkConnectionState.WIFI -> Color(0xFF00E5FF)
+                                    com.example.cctv.viewmodel.CctvViewModel.NetworkConnectionState.CELLULAR -> Color(0xFF00E676)
+                                    else -> LoveAlertRed
+                                }
+                            )
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "LIVE STREAM",
+                        text = when (networkConnectionType) {
+                            com.example.cctv.viewmodel.CctvViewModel.NetworkConnectionState.WIFI -> "📶 WI-FI | $adaptiveProfileLabel"
+                            com.example.cctv.viewmodel.CctvViewModel.NetworkConnectionState.CELLULAR -> "📡 MOBILE DATA | $adaptiveProfileLabel"
+                            else -> "⚠️ OFFLINE"
+                        },
                         color = Color.White,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )

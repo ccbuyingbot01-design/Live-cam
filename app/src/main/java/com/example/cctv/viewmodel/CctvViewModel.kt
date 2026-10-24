@@ -343,6 +343,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         monitorBatteryState()
+        monitorNetworkState()
         initUdpStreaming()
         startSupabaseRealtimeLoop()
         loadSavedSession()
@@ -548,21 +549,76 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    // ── Real-Time Network & Adaptive Streaming Telemetry ─────────────────────
+    enum class NetworkConnectionState {
+        WIFI, CELLULAR, OFFLINE
+    }
+
+    private val _networkConnectionType = MutableStateFlow(NetworkConnectionState.WIFI)
+    val networkConnectionType: StateFlow<NetworkConnectionState> = _networkConnectionType.asStateFlow()
+
+    private val _adaptiveProfileLabel = MutableStateFlow("720p HD @ 30 FPS")
+    val adaptiveProfileLabel: StateFlow<String> = _adaptiveProfileLabel.asStateFlow()
+
+    private fun monitorNetworkState() {
+        try {
+            val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return
+            val request = android.net.NetworkRequest.Builder()
+                .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+
+            val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onCapabilitiesChanged(network: android.net.Network, caps: android.net.NetworkCapabilities) {
+                    val isWifi = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+                    val isCellular = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)
+                    val state = when {
+                        isWifi -> NetworkConnectionState.WIFI
+                        isCellular -> NetworkConnectionState.CELLULAR
+                        else -> NetworkConnectionState.OFFLINE
+                    }
+                    _networkConnectionType.value = state
+
+                    if (state == NetworkConnectionState.WIFI) {
+                        _adaptiveProfileLabel.value = "720p HD @ 30 FPS (Wi-Fi)"
+                        activeFrameAnalyzer?.updatePerformanceProfile(targetFps = 30, targetQuality = 50, targetMaxDim = 720)
+                    } else if (state == NetworkConnectionState.CELLULAR) {
+                        _adaptiveProfileLabel.value = "480p SD @ 30 FPS (Mobile CGNAT)"
+                        activeFrameAnalyzer?.updatePerformanceProfile(targetFps = 30, targetQuality = 35, targetMaxDim = 480)
+                    }
+                }
+
+                override fun onLost(network: android.net.Network) {
+                    _networkConnectionType.value = NetworkConnectionState.OFFLINE
+                    _adaptiveProfileLabel.value = "Offline"
+                }
+            }
+
+            cm.registerNetworkCallback(request, callback)
+        } catch (e: Exception) {
+            Log.w("CctvViewModel", "NetworkCallback registration warning: ${e.message}")
+        }
+    }
+
     fun updateLatestFrame(base64: String) {
         _latestFrameBase64.value = base64
     }
 
-    fun getSanitizedRoomName(username: String? = null): String {
-        val u = username ?: _supabaseUser.value?.username ?: "camera"
-        val clean = u.trim().lowercase().replace(Regex("[^a-z0-9]"), "")
+    fun getSanitizedRoomName(input: String? = null): String {
+        val raw = input ?: _supabaseUser.value?.username ?: "camera"
+        var clean = raw.trim().lowercase().replace(Regex("[^a-z0-9]"), "")
+        while (clean.startsWith("lovecctv")) {
+            clean = clean.removePrefix("lovecctv")
+        }
         val finalUser = if (clean.isBlank()) "camera" else clean
         return "lovecctv_$finalUser"
     }
 
     fun startLiveKitSender(roomName: String = getSanitizedRoomName()) {
         viewModelScope.launch {
+            val targetRoom = getSanitizedRoomName(roomName)
+            Log.i("CctvViewModel", "Starting LiveKit Sender for sanitized room: $targetRoom")
             liveKitManager.connectAsSender(
-                roomName = getSanitizedRoomName(roomName),
+                roomName = targetRoom,
                 identity = "camera_" + currentDevice.value.id,
                 scope = viewModelScope
             )
@@ -571,8 +627,10 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startLiveKitViewer(roomName: String = getSanitizedRoomName()) {
         viewModelScope.launch {
+            val targetRoom = getSanitizedRoomName(roomName)
+            Log.i("CctvViewModel", "Starting LiveKit Viewer for sanitized room: $targetRoom")
             liveKitManager.connectAsViewer(
-                roomName = getSanitizedRoomName(roomName),
+                roomName = targetRoom,
                 identity = "viewer_mobile_app",
                 scope = viewModelScope
             )
