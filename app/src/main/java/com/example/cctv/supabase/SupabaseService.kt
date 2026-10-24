@@ -150,7 +150,7 @@ class SupabaseService {
                     errorJson.optString("error_description", "Sign up failed. Check credentials."))
                 return@withContext Result.failure(Exception(errorMsg))
             }
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "Auth error", e)
             Result.failure(Exception("Network error: ${e.message}"))
         }
@@ -196,7 +196,7 @@ class SupabaseService {
 
             val response = client.newCall(request).execute()
             response.isSuccessful
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "Failed to publish stream: ${e.message}")
             false
         }
@@ -235,7 +235,7 @@ class SupabaseService {
                 }
             }
             null
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "Fetch stream error: ${e.message}")
             null
         }
@@ -271,7 +271,7 @@ class SupabaseService {
 
             val response = client.newCall(request).execute()
             response.isSuccessful
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "Update remote control error", e)
             false
         }
@@ -315,7 +315,7 @@ class SupabaseService {
 
             val response = client.newCall(request).execute()
             response.isSuccessful
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "Log motion error", e)
             false
         }
@@ -359,10 +359,10 @@ class SupabaseService {
                             torchTriggered = obj.optBoolean("torch_triggered", false),
                             timestamp = obj.optLong("timestamp", System.currentTimeMillis())
                         )
-                    } catch (e: Throwable) { null }
+                    } catch (e: Exception) { null }
                 }
             } else emptyList()
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "fetchUnreadAlerts error", e)
             emptyList()
         }
@@ -386,7 +386,7 @@ class SupabaseService {
 
             val response = client.newCall(request).execute()
             response.isSuccessful
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "acknowledgeAlert error", e)
             false
         }
@@ -420,7 +420,7 @@ class SupabaseService {
 
             val response = client.newCall(request).execute()
             response.isSuccessful
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "registerFcmToken error", e)
             false
         }
@@ -448,7 +448,7 @@ class SupabaseService {
 
             val response = client.newCall(request).execute()
             response.isSuccessful
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "Insert command error", e)
             false
         }
@@ -490,10 +490,10 @@ class SupabaseService {
                             consumed = obj.optBoolean("consumed", false),
                             timestamp = obj.optLong("timestamp", 0)
                         )
-                    } catch (e: Throwable) { null }
+                    } catch (e: Exception) { null }
                 }
             } else emptyList()
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "fetchPendingCommands error", e)
             emptyList()
         }
@@ -518,7 +518,7 @@ class SupabaseService {
 
             val response = client.newCall(request).execute()
             response.isSuccessful
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "markCommandConsumed error", e)
             false
         }
@@ -552,7 +552,7 @@ class SupabaseService {
 
             val response = client.newCall(request).execute()
             response.isSuccessful
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "Create paired device error: ${e.message}")
             false
         }
@@ -585,7 +585,7 @@ class SupabaseService {
                 }
             }
             null
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "Get paired device error", e)
             null
         }
@@ -616,10 +616,10 @@ class SupabaseService {
                             isStreaming = false,
                             batteryLevel = 100
                         )
-                    } catch (e: Throwable) { null }
+                    } catch (e: Exception) { null }
                 }
             } else emptyList()
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "List devices error", e)
             emptyList()
         }
@@ -635,7 +635,7 @@ class SupabaseService {
                 .build()
             val response = client.newCall(request).execute()
             response.isSuccessful
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "cleanUpStalePairedDevices error", e)
             false
         }
@@ -651,7 +651,7 @@ class SupabaseService {
                 .build()
             val response = client.newCall(request).execute()
             response.isSuccessful
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "Clear paired devices error: ${e.message}")
             false
         }
@@ -689,7 +689,7 @@ class SupabaseService {
 
             val response = client.newCall(request).execute()
             response.isSuccessful
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "saveDevicePreference error: ${e.message}")
             false
         }
@@ -722,7 +722,7 @@ class SupabaseService {
                 }
             }
             null
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e("SupabaseService", "fetchDevicePreference error: ${e.message}")
             null
         }

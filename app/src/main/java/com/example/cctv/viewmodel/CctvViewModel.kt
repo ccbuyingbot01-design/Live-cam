@@ -247,7 +247,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                 .enableClassification()
                 .build()
             com.google.mlkit.vision.objects.ObjectDetection.getClient(opts)
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             null
         }
     }
@@ -294,7 +294,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                             updateDetectedHumans(results)
                         }
                     }
-            } catch (e: Throwable) {
+            } catch (e: Exception) {
                 Log.w("CctvViewModel", "Viewer ML Kit detection error: ${e.message}")
             }
         }
@@ -434,7 +434,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         val saved = SessionManager.getSavedModeSync(getApplication()) ?: return null
         return try {
             DeviceMode.valueOf(saved)
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
             null
         }
     }
@@ -594,7 +594,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             cm.registerNetworkCallback(request, callback)
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.w("CctvViewModel", "NetworkCallback registration warning: ${e.message}")
         }
     }

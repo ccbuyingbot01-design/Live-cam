@@ -38,13 +38,7 @@ object DebugLogger {
     private val _hasErrors = MutableStateFlow(false)
     val hasErrors: StateFlow<Boolean> = _hasErrors.asStateFlow()
 
-    private fun getFormattedTime(): String {
-        return try {
-            SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
-        } catch (_: Throwable) {
-            System.currentTimeMillis().toString()
-        }
-    }
+    private val dateFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
     private var isHandlerInstalled = false
 
@@ -54,7 +48,7 @@ object DebugLogger {
             val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
 
             Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-                val timeStr = getFormattedTime()
+                val timeStr = dateFormat.format(Date())
                 val stackWriter = StringWriter()
                 throwable.printStackTrace(PrintWriter(stackWriter))
                 val fullTrace = stackWriter.toString()
@@ -120,7 +114,7 @@ object DebugLogger {
         addEntry(
             DebugLogEntry(
                 id = ++idCounter,
-                timestamp = getFormattedTime(),
+                timestamp = dateFormat.format(Date()),
                 level = LogLevel.INFO,
                 tag = tag,
                 message = message
@@ -138,7 +132,7 @@ object DebugLogger {
         addEntry(
             DebugLogEntry(
                 id = ++idCounter,
-                timestamp = getFormattedTime(),
+                timestamp = dateFormat.format(Date()),
                 level = LogLevel.WARN,
                 tag = tag,
                 message = message,
@@ -157,7 +151,7 @@ object DebugLogger {
         addEntry(
             DebugLogEntry(
                 id = ++idCounter,
-                timestamp = getFormattedTime(),
+                timestamp = dateFormat.format(Date()),
                 level = LogLevel.ERROR,
                 tag = tag,
                 message = message,

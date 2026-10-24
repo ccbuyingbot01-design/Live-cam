@@ -38,19 +38,8 @@ class LiveKitManager(private val context: Context) {
         private const val STREAM_STALL_THRESHOLD_MS = 7000L
     }
 
-    private var _room: Room? = null
-    val room: Room?
-        get() {
-            if (_room == null) {
-                _room = try {
-                    LiveKit.create(context)
-                } catch (e: Throwable) {
-                    Log.e(TAG, "Failed to initialize LiveKit Room on this device: ${e.message}", e)
-                    null
-                }
-            }
-            return _room
-        }
+    var room: Room = LiveKit.create(context)
+        private set
 
     private val connectMutex = Mutex()
     private var lastRoomName: String? = null
@@ -84,15 +73,14 @@ class LiveKitManager(private val context: Context) {
     private var savedOnTrackSubscribed: ((VideoTrack) -> Unit)? = null
 
     fun isConnectedOrConnecting(): Boolean {
-        val currentRoom = room ?: return false
-        val state = currentRoom.state
+        val state = room.state
         return state == Room.State.CONNECTED || state == Room.State.CONNECTING || state == Room.State.RECONNECTING
     }
 
     fun initVideoRenderer(view: TextureViewRenderer) {
         try {
-            room?.initVideoRenderer(view)
-        } catch (e: Throwable) {
+            room.initVideoRenderer(view)
+        } catch (e: Exception) {
             Log.w(TAG, "initVideoRenderer fallback", e)
         }
     }
@@ -136,10 +124,6 @@ class LiveKitManager(private val context: Context) {
         wsUrl: String = LiveKitTokenGenerator.LIVEKIT_CLOUD_URL,
         scope: CoroutineScope? = null
     ): Boolean = connectMutex.withLock {
-        val currentRoom = room ?: run {
-            Log.e(TAG, "LiveKit room unavailable on this device.")
-            return@withLock false
-        }
         if (scope != null) externalScope = scope
         val normalizedRoom = roomName.trim().lowercase()
         lastRoomName = normalizedRoom
@@ -151,12 +135,12 @@ class LiveKitManager(private val context: Context) {
 
         return try {
             if (isConnectedOrConnecting()) {
-                if (currentRoom.state == Room.State.CONNECTED && lastRoomName == normalizedRoom && lastIsSender == true) {
+                if (room.state == Room.State.CONNECTED && lastRoomName == normalizedRoom && lastIsSender == true) {
                     Log.d(TAG, "Already connected as sender to room $normalizedRoom")
                     return true
                 }
                 Log.d(TAG, "Resetting previous session before connecting as sender...")
-                try { currentRoom.disconnect() } catch (_: Throwable) {}
+                try { room.disconnect() } catch (_: Exception) {}
             }
 
             val token = LiveKitTokenGenerator.generateAccessToken(
@@ -166,16 +150,16 @@ class LiveKitManager(private val context: Context) {
             )
 
             Log.i(TAG, "Connecting Camera Sender to LiveKit Cloud ($wsUrl, room: $normalizedRoom)...")
-            currentRoom.connect(wsUrl, token)
+            room.connect(wsUrl, token)
             _isConnected.value = true
             _isReconnecting.value = false
             _reconnectAttempt.value = 0
             _streamHealthStatus.value = "EXCELLENT (<300ms)"
 
-            val localParticipant = currentRoom.localParticipant
+            val localParticipant = room.localParticipant
             try {
                 localParticipant.setMicrophoneEnabled(true)
-            } catch (e: Throwable) {
+            } catch (e: Exception) {
                 Log.w(TAG, "Microphone enable warning: ${e.message}")
             }
 
@@ -190,7 +174,7 @@ class LiveKitManager(private val context: Context) {
 
             Log.i(TAG, "Published smooth CameraX LiveKit WebRTC video track to LiveKit Cloud!")
             true
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e(TAG, "Failed to connect LiveKit Sender", e)
             _isConnected.value = false
             _streamHealthStatus.value = "CONNECTION ERROR"
@@ -210,10 +194,6 @@ class LiveKitManager(private val context: Context) {
         scope: CoroutineScope,
         onVideoTrackSubscribed: (VideoTrack) -> Unit = {}
     ): Boolean = connectMutex.withLock {
-        val currentRoom = room ?: run {
-            Log.e(TAG, "LiveKit room unavailable on this device.")
-            return@withLock false
-        }
         externalScope = scope
         savedOnTrackSubscribed = onVideoTrackSubscribed
         val normalizedRoom = roomName.trim().lowercase()
@@ -226,12 +206,12 @@ class LiveKitManager(private val context: Context) {
 
         return try {
             if (isConnectedOrConnecting()) {
-                if (currentRoom.state == Room.State.CONNECTED && lastRoomName == normalizedRoom && lastIsSender == false) {
+                if (room.state == Room.State.CONNECTED && lastRoomName == normalizedRoom && lastIsSender == false) {
                     Log.d(TAG, "Already connected as viewer to room $normalizedRoom")
                     return true
                 }
                 Log.d(TAG, "Resetting session before connecting as viewer...")
-                try { currentRoom.disconnect() } catch (_: Throwable) {}
+                try { room.disconnect() } catch (_: Exception) {}
             }
 
             val token = LiveKitTokenGenerator.generateAccessToken(
@@ -244,7 +224,7 @@ class LiveKitManager(private val context: Context) {
 
             eventsJob?.cancel()
             eventsJob = scope.launch(Dispatchers.IO) {
-                currentRoom.events.collect { event ->
+                room.events.collect { event ->
                     when (event) {
                         is RoomEvent.TrackSubscribed -> {
                             val track = event.track
@@ -288,7 +268,7 @@ class LiveKitManager(private val context: Context) {
                 }
             }
 
-            currentRoom.connect(wsUrl, token)
+            room.connect(wsUrl, token)
             _isConnected.value = true
             _isReconnecting.value = false
             _reconnectAttempt.value = 0
@@ -297,7 +277,7 @@ class LiveKitManager(private val context: Context) {
 
             checkExistingTracks(onVideoTrackSubscribed)
             true
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e(TAG, "Failed to connect LiveKit Viewer", e)
             _isConnected.value = false
             _streamHealthStatus.value = "CONNECTION ERROR"
@@ -306,9 +286,8 @@ class LiveKitManager(private val context: Context) {
     }
 
     private fun checkExistingTracks(onVideoTrackSubscribed: (VideoTrack) -> Unit) {
-        val currentRoom = room ?: return
         try {
-            for ((_, participant) in currentRoom.remoteParticipants) {
+            for ((_, participant) in room.remoteParticipants) {
                 for ((publication, track) in participant.videoTrackPublications) {
                     val videoTrack = track ?: publication.track
                     if (videoTrack is VideoTrack) {
@@ -321,7 +300,7 @@ class LiveKitManager(private val context: Context) {
                     }
                 }
             }
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.w(TAG, "Error checking existing tracks", e)
         }
     }
@@ -342,7 +321,7 @@ class LiveKitManager(private val context: Context) {
                 if (targetRoom.isNullOrBlank() || isSender == null) continue
 
                 val now = System.currentTimeMillis()
-                val currentState = room?.state ?: Room.State.DISCONNECTED
+                val currentState = room.state
 
                 // Case 1: Room dropped or disconnected
                 if (currentState == Room.State.DISCONNECTED && !_isReconnecting.value) {
@@ -387,7 +366,7 @@ class LiveKitManager(private val context: Context) {
         delay(backoffMs)
 
         return try {
-            try { room?.disconnect() } catch (_: Throwable) {}
+            try { room.disconnect() } catch (_: Exception) {}
             
             val success = if (isSender) {
                 connectAsSender(roomName = roomName, identity = identity, wsUrl = lastWsUrl)
@@ -412,7 +391,7 @@ class LiveKitManager(private val context: Context) {
                 Log.w(TAG, "Auto-reconnection attempt #$attempt failed. Watchdog will retry.")
                 false
             }
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e(TAG, "Auto-reconnect error on attempt #$attempt", e)
             false
         }
@@ -440,7 +419,7 @@ class LiveKitManager(private val context: Context) {
             eventsJob = null
             bitmapCapturer = null
             customVideoTrack = null
-            room?.disconnect()
+            room.disconnect()
             _isConnected.value = false
             _isReconnecting.value = false
             _reconnectAttempt.value = 0
@@ -450,7 +429,7 @@ class LiveKitManager(private val context: Context) {
             lastIdentity = null
             lastIsSender = null
             Log.i(TAG, "Disconnected LiveKit Room.")
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.e(TAG, "Disconnect error", e)
         }
     }
