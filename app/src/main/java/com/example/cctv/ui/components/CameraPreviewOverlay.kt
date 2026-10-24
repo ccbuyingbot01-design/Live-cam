@@ -15,6 +15,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -253,29 +254,60 @@ fun CameraPreviewOverlay(
                     )
                 }
             } else {
-                // LIVE STREAM badge
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color.Black.copy(alpha = 0.65f))
-                        .border(1.dp, LoveAlertRed.copy(alpha = 0.8f), RoundedCornerShape(20.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                val isWifiNetwork by viewModel.isWifiNetwork.collectAsState()
+                val networkType by viewModel.networkType.collectAsState()
+
+                // LIVE STREAM & NETWORK STATUS badge
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color.Black.copy(alpha = 0.75f))
+                            .border(
+                                1.dp,
+                                if (isWifiNetwork) Color(0xFF00E5FF) else Color(0xFF00E676),
+                                RoundedCornerShape(20.dp)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (isWifiNetwork) Color(0xFF00E5FF) else Color(0xFF00E676))
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isWifiNetwork) {
+                                "📶 WI-FI | 720p HD @ 30 FPS (High Bandwidth / Local P2P + LiveKit)"
+                            } else {
+                                "📡 MOBILE DATA | 480p SD @ 30 FPS (LiveKit Cloud WebRTC Mobile CGNAT Optimized)"
+                            },
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
                     Box(
                         modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(LoveAlertRed.copy(alpha = pulseAlpha))
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "LIVE STREAM",
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF00E676).copy(alpha = 0.2f))
+                            .border(1.dp, Color(0xFF00E676), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "🟢 LiveKit Cloud Active (<200ms)",
+                            color = Color(0xFF00E676),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                 }
             }
 

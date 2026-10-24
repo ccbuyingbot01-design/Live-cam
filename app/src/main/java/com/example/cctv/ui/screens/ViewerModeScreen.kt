@@ -127,6 +127,8 @@ fun ViewerModeScreen(
     val liveKitReconnecting by viewModel.liveKitReconnecting.collectAsState()
     val liveKitHealthStatus by viewModel.liveKitHealthStatus.collectAsState()
     val liveKitReconnectAttempt by viewModel.liveKitReconnectAttempt.collectAsState()
+    val networkType by viewModel.networkType.collectAsState()
+    val isWifiNetwork by viewModel.isWifiNetwork.collectAsState()
 
     var showHeatmap by remember { mutableStateOf(true) }
     var isTimelineOpen by remember { mutableStateOf(false) }
@@ -137,8 +139,11 @@ fun ViewerModeScreen(
     val timeFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
     val supabaseUser by viewModel.supabaseUser.collectAsState()
 
-    LaunchedEffect(supabaseUser?.username) {
-        viewModel.startLiveKitViewer(viewModel.getSanitizedRoomName(supabaseUser?.username))
+    LaunchedEffect(supabaseUser?.username, activeCamera?.pairingCode) {
+        val targetKey = activeCamera?.pairingCode?.ifBlank { null }
+            ?: supabaseUser?.username?.ifBlank { null }
+            ?: "camera"
+        viewModel.startLiveKitViewer(viewModel.getSanitizedRoomName(targetKey))
     }
 
     Box(modifier = modifier.fillMaxSize().testTag("viewer_mode_screen")) {
@@ -400,6 +405,11 @@ fun ViewerModeScreen(
                                         fontFamily = FontFamily.Monospace
                                     )
                                 }
+
+                                com.example.cctv.ui.components.NetworkStatusIndicator(
+                                    isWifi = isWifiNetwork,
+                                    networkName = networkType
+                                )
                             }
 
                             IconButton(

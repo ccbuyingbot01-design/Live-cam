@@ -108,6 +108,8 @@ fun CameraModeScreen(
     val recordingMessage by viewModel.recordingMessage.collectAsState()
     val supabaseUser by viewModel.supabaseUser.collectAsState()
     val batteryReport by viewModel.batteryReport.collectAsState()
+    val networkType by viewModel.networkType.collectAsState()
+    val isWifiNetwork by viewModel.isWifiNetwork.collectAsState()
     var showQrDialog by remember { mutableStateOf(false) }
     var showQrScanner by remember { mutableStateOf(false) }
     var showBatteryDialog by remember { mutableStateOf(false) }
@@ -159,8 +161,11 @@ fun CameraModeScreen(
     }
 
     // Auto-start LiveKit Cloud WebRTC sender on camera screen open
-    LaunchedEffect(supabaseUser?.username) {
-        viewModel.startLiveKitSender(viewModel.getSanitizedRoomName(supabaseUser?.username))
+    LaunchedEffect(supabaseUser?.username, currentDevice.pairingCode) {
+        val targetKey = currentDevice.pairingCode.ifBlank { null }
+            ?: supabaseUser?.username?.ifBlank { null }
+            ?: "camera"
+        viewModel.startLiveKitSender(viewModel.getSanitizedRoomName(targetKey))
     }
 
     Box(
@@ -244,6 +249,12 @@ fun CameraModeScreen(
                         }
                     }
                 }
+
+                // Network Status Indicator Badge (Wi-Fi vs Cellular)
+                com.example.cctv.ui.components.NetworkStatusIndicator(
+                    isWifi = isWifiNetwork,
+                    networkName = networkType
+                )
 
                 // Bottom Dashboard Controls & Motion Meter
                 Column(

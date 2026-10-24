@@ -95,6 +95,12 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
 
     val dailyMotionPoints: StateFlow<List<com.example.cctv.data.MotionPoint>> = repository.dailyMotionPoints
 
+    private val _networkType = MutableStateFlow("Wi-Fi")
+    val networkType: StateFlow<String> = _networkType.asStateFlow()
+
+    private val _isWifiNetwork = MutableStateFlow(true)
+    val isWifiNetwork: StateFlow<Boolean> = _isWifiNetwork.asStateFlow()
+
     // ── Video Recording State ──────────────────────────────────────────────
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
@@ -347,6 +353,48 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         startSupabaseRealtimeLoop()
         loadSavedSession()
         observeConnectionForAutoRecord()
+        startNetworkMonitor()
+    }
+
+    private fun startNetworkMonitor() {
+        viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                try {
+                    val context = getApplication<Application>()
+                    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+                    val network = cm?.activeNetwork
+                    val caps = network?.let { cm.getNetworkCapabilities(it) }
+                    val isWifi = caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
+                    val isCellular = caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) == true
+                    
+                    val typeName = when {
+                        isWifi -> "Wi-Fi (P2P + LiveKit)"
+                        isCellular -> "Cellular 4G/5G (LiveKit Cloud)"
+                        else -> "Connected"
+                    }
+                    _networkType.value = typeName
+                    _isWifiNetwork.value = isWifi
+
+                    // Adaptive streaming quality adjustment based on network
+                    if (isCellular) {
+                        activeFrameAnalyzer?.updatePerformanceProfile(
+                            targetFps = 20,
+                            targetQuality = 25,
+                            targetMaxDim = 280
+                        )
+                    } else {
+                        activeFrameAnalyzer?.updatePerformanceProfile(
+                            targetFps = 30,
+                            targetQuality = 35,
+                            targetMaxDim = 360
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.w("CctvViewModel", "Network monitor error: ${e.message}")
+                }
+                delay(3000L)
+            }
+        }
     }
 
     private fun initUdpStreaming() {
@@ -559,20 +607,46 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
         return "lovecctv_$finalUser"
     }
 
-    fun startLiveKitSender(roomName: String = getSanitizedRoomName()) {
+    fun getRoomNameForDevice(username: String? = null, device: CctvDevice? = null): String {
+        val userClean = (username ?: _supabaseUser.value?.username ?: "").trim().lowercase().replace(Regex("[^a-z0-9]"), "")
+        val devCodeClean = (device?.pairingCode ?: "").trim().lowercase().replace(Regex("[^a-z0-9]"), "")
+        val devIdClean = (device?.id ?: "").trim().lowercase().replace(Regex("[^a-z0-9]"), "")
+
+        val key = when {
+            devCodeClean.isNotBlank() -> devCodeClean
+            userClean.isNotBlank() && devIdClean.isNotBlank() -> "${userClean}_$devIdClean"
+            userClean.isNotBlank() -> userClean
+            devIdClean.isNotBlank() -> devIdClean
+            else -> "camera"
+        }
+        return "lovecctv_$key"
+    }
+
+    fun startLiveKitSender(roomName: String? = null) {
+        val targetRoom = if (roomName != null && roomName.startsWith("lovecctv_")) {
+            roomName
+        } else {
+            getRoomNameForDevice(roomName, currentDevice.value)
+        }
         viewModelScope.launch {
             liveKitManager.connectAsSender(
-                roomName = getSanitizedRoomName(roomName),
+                roomName = targetRoom,
                 identity = "camera_" + currentDevice.value.id,
                 scope = viewModelScope
             )
         }
     }
 
-    fun startLiveKitViewer(roomName: String = getSanitizedRoomName()) {
+    fun startLiveKitViewer(roomName: String? = null) {
+        val activeCam = pairedDevices.value.find { it.id == selectedCameraId.value } ?: pairedDevices.value.firstOrNull()
+        val targetRoom = if (roomName != null && roomName.startsWith("lovecctv_")) {
+            roomName
+        } else {
+            getRoomNameForDevice(roomName, activeCam)
+        }
         viewModelScope.launch {
             liveKitManager.connectAsViewer(
-                roomName = getSanitizedRoomName(roomName),
+                roomName = targetRoom,
                 identity = "viewer_mobile_app",
                 scope = viewModelScope
             )
@@ -823,7 +897,7 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                                     sirenActive = dev.sirenActive,
                                     nightVision = dev.nightVision,
                                     batteryLevel = dev.batteryLevel,
-                                    frameBase64 = _latestFrameBase64.value,
+                                    frameBase64 = null, // Excluded: LiveKit WebRTC handles 100% of cloud video streaming
                                     recordingActive = _isRecording.value
                                 )
                                 repository.setCloudConnected(publishOk)
@@ -845,28 +919,11 @@ class CctvViewModel(application: Application) : AndroidViewModel(application) {
                                 startLiveKitViewer(getSanitizedRoomName(user.username))
                             }
 
-                            // Viewer mode: fetch stream metadata and cellular fallback frame from camera user
+                            // Viewer mode: fetch stream metadata from camera user (video streaming is exclusively via LiveKit WebRTC)
                             val stream = repository.supabaseService.fetchStream(user.username)
                             if (stream != null) {
                                 repository.setCloudConnected(stream.isLive)
                                 _remoteStreamLive.value = stream.isLive
-                                _remoteFrameBase64.value = stream.frameBase64
-
-                                // If stream frameBase64 is present, decode as live image fallback for SIM networks
-                                stream.frameBase64?.let { b64 ->
-                                    if (b64.isNotBlank()) {
-                                        try {
-                                            val bytes = Base64.decode(b64, Base64.DEFAULT)
-                                            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                                            if (bmp != null) {
-                                                _liveStreamBitmap.value = bmp
-                                                runViewerHumanDetection(bmp)
-                                            }
-                                        } catch (e: Exception) {
-                                            Log.w("CctvViewModel", "Error decoding cloud fallback frame: ${e.message}")
-                                        }
-                                    }
-                                }
 
                                 // Sync remote camera state to paired devices
                                 val updatedList = pairedDevices.value.map { d ->

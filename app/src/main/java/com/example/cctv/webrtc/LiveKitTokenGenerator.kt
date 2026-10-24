@@ -42,6 +42,11 @@ object LiveKitTokenGenerator {
                 put("canPublish", isPublisher)
                 put("canSubscribe", true)
                 put("canPublishData", true)
+                put("canPublishSources", org.json.JSONArray().apply {
+                    put("camera")
+                    put("microphone")
+                    put("screen_share")
+                })
             }
 
             // Payload
