@@ -127,8 +127,6 @@ fun ViewerModeScreen(
     val liveKitReconnecting by viewModel.liveKitReconnecting.collectAsState()
     val liveKitHealthStatus by viewModel.liveKitHealthStatus.collectAsState()
     val liveKitReconnectAttempt by viewModel.liveKitReconnectAttempt.collectAsState()
-    val networkConnectionType by viewModel.networkConnectionType.collectAsState()
-    val adaptiveProfileLabel by viewModel.adaptiveProfileLabel.collectAsState()
 
     var showHeatmap by remember { mutableStateOf(true) }
     var isTimelineOpen by remember { mutableStateOf(false) }
@@ -365,49 +363,25 @@ fun ViewerModeScreen(
                             Row(
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
-                                    .padding(8.dp),
+                                    .padding(10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                // Visual Network Status Indicator Badge (Wi-Fi vs Cellular Data)
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(
-                                            when (networkConnectionType) {
-                                                com.example.cctv.viewmodel.CctvViewModel.NetworkConnectionState.WIFI -> Color(0xFF00E5FF).copy(alpha = 0.95f)
-                                                com.example.cctv.viewmodel.CctvViewModel.NetworkConnectionState.CELLULAR -> Color(0xFF00E676).copy(alpha = 0.95f)
-                                                else -> Color(0xFFFF3D00).copy(alpha = 0.95f)
-                                            }
-                                        )
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = when (networkConnectionType) {
-                                            com.example.cctv.viewmodel.CctvViewModel.NetworkConnectionState.WIFI -> "📶 WI-FI | $adaptiveProfileLabel"
-                                            com.example.cctv.viewmodel.CctvViewModel.NetworkConnectionState.CELLULAR -> "📡 MOBILE DATA | $adaptiveProfileLabel"
-                                            else -> "⚠️ NO NETWORK"
-                                        },
-                                        color = Color.Black,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-
-                                // LiveKit Cloud WebRTC Status Badge
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(
                                             when {
                                                 liveKitReconnecting -> Color(0xFFFF3D00).copy(alpha = 0.9f)
-                                                liveKitVideoTrack != null -> Color(0xFF7C4DFF).copy(alpha = 0.95f)
+                                                forceCellularJpegFallback -> Color(0xFFFF9100).copy(alpha = 0.9f)
+                                                liveKitVideoTrack != null -> Color(0xFF00E5FF).copy(alpha = 0.9f)
                                                 else -> Color(0xFFFF9100).copy(alpha = 0.85f)
                                             }
                                         )
                                         .clickable {
-                                            if (liveKitVideoTrack == null) {
+                                            if (liveKitVideoTrack != null) {
+                                                forceCellularJpegFallback = !forceCellularJpegFallback
+                                            } else {
                                                 viewModel.forceReconnectLiveKit()
                                             }
                                         }
@@ -415,13 +389,14 @@ fun ViewerModeScreen(
                                 ) {
                                     Text(
                                         text = when {
-                                            liveKitReconnecting -> "🔄 RECONNECTING (#$liveKitReconnectAttempt)..."
-                                            liveKitVideoTrack != null -> "🟢 LiveKit Cloud Active (<200ms)"
-                                            else -> "🔄 Connecting LiveKit WebRTC..."
+                                            liveKitReconnecting -> "🔄 RECONNECTING (#$liveKitReconnectAttempt)... TAP TO RETRY"
+                                            forceCellularJpegFallback -> "● SIM DATA FEED (JPEG) | TAP FOR WEBRTC"
+                                            liveKitVideoTrack != null -> "● LIVEKIT WebRTC | TAP FOR SIM FEED"
+                                            else -> "● CELLULAR FEED | $liveKitHealthStatus"
                                         },
-                                        color = Color.White,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
+                                        color = Color.Black,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
                                         fontFamily = FontFamily.Monospace
                                     )
                                 }
