@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
 import com.example.cctv.data.AiChatMessage
 import com.example.cctv.data.AiDetectionFeedItem
 import com.example.cctv.data.AiThreatAssessment
+import com.example.cctv.data.AiThreatAssessmentStatus
 
 
 object AiVisionAgent {
@@ -165,12 +166,26 @@ object AiVisionAgent {
         }
     }
 
+    private fun parseThreatStatus(statusStr: String): AiThreatAssessmentStatus {
+        val normalized = statusStr.uppercase().replace(" ", "_").trim()
+        return try {
+            AiThreatAssessmentStatus.valueOf(normalized)
+        } catch (e: Exception) {
+            when {
+                normalized.contains("THREAT") -> AiThreatAssessmentStatus.THREAT_DETECTED
+                normalized.contains("SUSPICIOUS") -> AiThreatAssessmentStatus.SUSPICIOUS
+                normalized.contains("LOW") -> AiThreatAssessmentStatus.LOW_RISK
+                else -> AiThreatAssessmentStatus.SAFE
+            }
+        }
+    }
+
     suspend fun evaluateThreatLevel(contextLog: String, bitmap: Bitmap? = null): AiThreatAssessment = withContext(Dispatchers.IO) {
         val apiKey = BuildConfig.GEMINI_API_KEY
         if (!isApiKeyConfigured()) {
             return@withContext AiThreatAssessment(
                 score = 8,
-                status = "SAFE",
+                status = AiThreatAssessmentStatus.SAFE,
                 summary = "ML Kit Local Guard active. All camera parameters normal.",
                 recommendedActions = listOf("Monitor Feeds", "Night Mode Auto", "Torch Ready")
             )
@@ -238,7 +253,7 @@ object AiVisionAgent {
                         if (text.isNotBlank()) {
                             val obj = JSONObject(text)
                             val score = obj.optInt("score", 12)
-                            val status = obj.optString("status", "SAFE")
+                            val statusStr = obj.optString("status", "SAFE")
                             val summary = obj.optString("summary", "Scene quiet.")
                             val actionsArr = obj.optJSONArray("recommendedActions")
                             val actions = mutableListOf<String>()
@@ -249,7 +264,7 @@ object AiVisionAgent {
                             }
                             return@withContext AiThreatAssessment(
                                 score = score,
-                                status = status,
+                                status = parseThreatStatus(statusStr),
                                 summary = summary,
                                 recommendedActions = if (actions.isNotEmpty()) actions else listOf("Monitor Live Stream")
                             )
@@ -257,10 +272,10 @@ object AiVisionAgent {
                     }
                 }
             }
-            AiThreatAssessment(10, "SAFE", "Room quiet and clear.", listOf("Monitor Live Stream"))
+            AiThreatAssessment(10, AiThreatAssessmentStatus.SAFE, "Room quiet and clear.", listOf("Monitor Live Stream"))
         } catch (e: Exception) {
             Log.e(TAG, "Threat eval error", e)
-            AiThreatAssessment(12, "SAFE", "ML Kit monitoring active.", listOf("Monitor Feeds"))
+            AiThreatAssessment(12, AiThreatAssessmentStatus.SAFE, "ML Kit monitoring active.", listOf("Monitor Feeds"))
         }
     }
 

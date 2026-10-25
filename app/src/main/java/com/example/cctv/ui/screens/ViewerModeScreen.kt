@@ -82,6 +82,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.cctv.data.AiDetectionFeedItem
+import com.example.cctv.data.AiThreatAssessment
+import com.example.cctv.data.AiThreatAssessmentStatus
 import com.example.cctv.data.CctvDevice
 import com.example.cctv.ui.components.AiCopilotChatDialog
 import com.example.cctv.ui.components.MotionHeatmapOverlay
@@ -664,8 +667,8 @@ fun ViewerModeScreen(
 
 @Composable
 private fun RealTimeAiFeedsCard(
-    feeds: List<com.example.cctv.ai.AiDetectionFeedItem>,
-    threatAssessment: com.example.cctv.ai.AiThreatAssessment,
+    feeds: List<AiDetectionFeedItem>,
+    threatAssessment: AiThreatAssessment,
     isAnalyzingGemini: Boolean,
     onAnalyzeGemini: () -> Unit,
     onEvaluateThreat: () -> Unit,
@@ -747,8 +750,8 @@ private fun RealTimeAiFeedsCard(
                 border = androidx.compose.foundation.BorderStroke(
                     1.dp,
                     when (threatAssessment.status) {
-                        "THREAT DETECTED" -> LoveAlertRed
-                        "SUSPICIOUS" -> Color(0xFFFF9100)
+                        AiThreatAssessmentStatus.THREAT_DETECTED -> LoveAlertRed
+                        AiThreatAssessmentStatus.SUSPICIOUS -> Color(0xFFFF9100)
                         else -> SecurityGreen
                     }
                 ),
@@ -765,15 +768,15 @@ private fun RealTimeAiFeedsCard(
                                 imageVector = Icons.Default.Shield,
                                 contentDescription = "Threat Score",
                                 tint = when (threatAssessment.status) {
-                                    "THREAT DETECTED" -> LoveAlertRed
-                                    "SUSPICIOUS" -> Color(0xFFFF9100)
+                                    AiThreatAssessmentStatus.THREAT_DETECTED -> LoveAlertRed
+                                    AiThreatAssessmentStatus.SUSPICIOUS -> Color(0xFFFF9100)
                                     else -> SecurityGreen
                                 },
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "THREAT LEVEL: ${threatAssessment.status}",
+                                text = "THREAT LEVEL: ${threatAssessment.status.name.replace("_", " ")}",
                                 color = Color.White,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
@@ -783,8 +786,8 @@ private fun RealTimeAiFeedsCard(
                         Text(
                             text = "${threatAssessment.score}%",
                             color = when (threatAssessment.status) {
-                                "THREAT DETECTED" -> LoveAlertRed
-                                "SUSPICIOUS" -> Color(0xFFFF9100)
+                                AiThreatAssessmentStatus.THREAT_DETECTED -> LoveAlertRed
+                                AiThreatAssessmentStatus.SUSPICIOUS -> Color(0xFFFF9100)
                                 else -> SecurityGreen
                             },
                             fontSize = 14.sp,
@@ -798,8 +801,8 @@ private fun RealTimeAiFeedsCard(
                     LinearProgressIndicator(
                         progress = { (threatAssessment.score / 100f).coerceIn(0f, 1f) },
                         color = when (threatAssessment.status) {
-                            "THREAT DETECTED" -> LoveAlertRed
-                            "SUSPICIOUS" -> Color(0xFFFF9100)
+                            AiThreatAssessmentStatus.THREAT_DETECTED -> LoveAlertRed
+                            AiThreatAssessmentStatus.SUSPICIOUS -> Color(0xFFFF9100)
                             else -> SecurityGreen
                         },
                         trackColor = Color.Black.copy(alpha = 0.5f),

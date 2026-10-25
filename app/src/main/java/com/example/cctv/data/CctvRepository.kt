@@ -98,6 +98,14 @@ class CctvRepository {
         )
     }
 
+    fun updateNotificationPrefs(vibration: Boolean, sound: Boolean) {
+        val current = _currentDevice.value
+        _currentDevice.value = current.copy(
+            notificationVibration = vibration,
+            notificationSound = sound
+        )
+    }
+
     // ── Remote Control ───────────────────────────────────────────
 
     fun remoteToggleTorch(deviceId: String) {
@@ -171,7 +179,17 @@ class CctvRepository {
         CoroutineScope(Dispatchers.IO).launch {
             supabaseService.cleanUpStalePairedDevices(user, currentDev.name, hashedCode)
             supabaseService.createPairedDevice(user, hashedCode, currentDev.name, currentDev.ipAddress)
-            supabaseService.publishStream(user, true, false, false, false, false, currentDev.batteryLevel, false)
+            supabaseService.publishStream(
+                username = user,
+                isLive = true,
+                torchOn = false,
+                lensFacingFront = false,
+                sirenActive = false,
+                nightVision = false,
+                batteryLevel = currentDev.batteryLevel,
+                frameBase64 = null,
+                recordingActive = false
+            )
             refreshPairedDevices()
         }
     }
@@ -233,7 +251,15 @@ class CctvRepository {
         val newPoint = MotionPoint(xRatio = xRatio, yRatio = yRatio, intensity = intensity)
         _dailyMotionPoints.value = (_dailyMotionPoints.value.filter { it.timestamp > System.currentTimeMillis() - 86400000L } + newPoint)
         CoroutineScope(Dispatchers.IO).launch {
-            supabaseService.logMotionAlert(username ?: return@launch, dev.id, dev.name, intensity, severity.name, event.description, base64)
+            supabaseService.logMotionAlert(
+                username = username ?: return@launch,
+                deviceId = dev.id,
+                deviceName = dev.name,
+                severity = severity.name,
+                intensity = intensity,
+                description = event.description,
+                snapshotBase64 = base64
+            )
         }
     }
 
@@ -248,7 +274,17 @@ class CctvRepository {
     suspend fun syncDeviceStateToCloud() {
         val dev = _currentDevice.value
         val user = username ?: return
-        supabaseService.publishStream(user, true, dev.torchOn, dev.lensFacingFront, dev.sirenActive, dev.nightVision, dev.batteryLevel, dev.isRecording)
+        supabaseService.publishStream(
+            username = user,
+            isLive = true,
+            torchOn = dev.torchOn,
+            lensFacingFront = dev.lensFacingFront,
+            sirenActive = dev.sirenActive,
+            nightVision = dev.nightVision,
+            batteryLevel = dev.batteryLevel,
+            frameBase64 = null,
+            recordingActive = dev.isRecording
+        )
     }
 
     private fun remoteCommandCloud(deviceId: String, action: String) {
