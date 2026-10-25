@@ -15,29 +15,10 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
-data class AiDetectionFeedItem(
-    val id: String = java.util.UUID.randomUUID().toString(),
-    val title: String,
-    val detail: String,
-    val category: String, // "human", "motion", "night", "siren", "gemini", "battery"
-    val confidence: Float = 0.90f,
-    val timestamp: Long = System.currentTimeMillis(),
-    val isGeminiGenerated: Boolean = false
-)
+import com.example.cctv.data.AiChatMessage
+import com.example.cctv.data.AiDetectionFeedItem
+import com.example.cctv.data.AiThreatAssessment
 
-data class AiChatMessage(
-    val id: String = java.util.UUID.randomUUID().toString(),
-    val sender: String, // "User" or "AI Guard"
-    val message: String,
-    val timestamp: Long = System.currentTimeMillis()
-)
-
-data class AiThreatAssessment(
-    val score: Int = 10, // 0 to 100
-    val status: String = "SAFE", // "SAFE", "LOW RISK", "SUSPICIOUS", "THREAT DETECTED"
-    val summary: String = "Area clear and secure.",
-    val recommendedActions: List<String> = listOf("Monitor Stream", "Night Vision Auto", "Torch Standby")
-)
 
 object AiVisionAgent {
 

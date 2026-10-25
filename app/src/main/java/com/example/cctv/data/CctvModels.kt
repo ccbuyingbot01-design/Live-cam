@@ -15,6 +15,37 @@ enum class MotionSeverity {
     CRITICAL
 }
 
+enum class AiThreatAssessmentStatus {
+    SAFE, LOW_RISK, SUSPICIOUS, THREAT_DETECTED
+}
+
+@Keep
+data class AiDetectionFeedItem(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val detail: String,
+    val category: String,
+    val confidence: Float = 0.90f,
+    val timestamp: Long = System.currentTimeMillis(),
+    val isGeminiGenerated: Boolean = false
+)
+
+@Keep
+data class AiChatMessage(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val sender: String,
+    val message: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+@Keep
+data class AiThreatAssessment(
+    val score: Int = 10,
+    val status: AiThreatAssessmentStatus = AiThreatAssessmentStatus.SAFE,
+    val summary: String = "Area clear and secure.",
+    val recommendedActions: List<String> = listOf("Monitor Stream", "Night Vision Auto", "Torch Standby")
+)
+
 @Keep
 data class CctvDevice(
     val id: String,

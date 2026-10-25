@@ -30,7 +30,6 @@ class CctvRepository {
     )
     val currentDevice: StateFlow<CctvDevice> = _currentDevice.asStateFlow()
 
-    // Start with empty list – devices come from Supabase only
     private val _pairedDevices = MutableStateFlow<List<CctvDevice>>(emptyList())
     val pairedDevices: StateFlow<List<CctvDevice>> = _pairedDevices.asStateFlow()
 
@@ -40,31 +39,26 @@ class CctvRepository {
     private val _motionEvents = MutableStateFlow<List<MotionEvent>>(emptyList())
     val motionEvents: StateFlow<List<MotionEvent>> = _motionEvents.asStateFlow()
 
-    // Cloud connection status
+    private val _dailyMotionPoints = MutableStateFlow<List<MotionPoint>>(emptyList())
+    val dailyMotionPoints: StateFlow<List<MotionPoint>> = _dailyMotionPoints.asStateFlow()
+
     private val _isCloudConnected = MutableStateFlow(false)
     val isCloudConnected: StateFlow<Boolean> = _isCloudConnected.asStateFlow()
 
     val supabaseService = SupabaseService()
-
-    // Username for Supabase operations (to be set after authentication)
     var username: String? = null
         private set
 
-    fun setDeviceMode(mode: DeviceMode) {
-        _deviceMode.value = mode
-    }
+    fun setDeviceMode(mode: DeviceMode) { _deviceMode.value = mode }
 
     fun updatePairedDevices(list: List<CctvDevice>) {
         _pairedDevices.value = list
-        // Auto-select first device if none selected
         if (_selectedCameraId.value.isBlank() && list.isNotEmpty()) {
             _selectedCameraId.value = list.first().id
         }
     }
 
-    fun selectCameraDevice(id: String) {
-        _selectedCameraId.value = id
-    }
+    fun selectCameraDevice(id: String) { _selectedCameraId.value = id }
 
     fun updateTorch(enabled: Boolean) {
         _currentDevice.value = _currentDevice.value.copy(torchOn = enabled)
@@ -78,14 +72,6 @@ class CctvRepository {
 
     fun updateMotionSensitivity(sensitivity: Float) {
         _currentDevice.value = _currentDevice.value.copy(motionSensitivity = sensitivity)
-    }
-
-    fun toggleMotionGuard(enabled: Boolean) {
-        _currentDevice.value = _currentDevice.value.copy(motionGuardEnabled = enabled)
-    }
-
-    fun toggleStealthMode(enabled: Boolean) {
-        _currentDevice.value = _currentDevice.value.copy(stealthMode = enabled)
     }
 
     fun toggleNightVision(enabled: Boolean) {
@@ -103,40 +89,16 @@ class CctvRepository {
         launchSyncToCloud()
     }
 
+    fun updateBatteryStatus(level: Int, charging: Boolean, tempCelsius: Float = 28f) {
+        val current = _currentDevice.value
         _currentDevice.value = current.copy(
             batteryLevel = level.coerceIn(0, 100),
-            isLowPowerMode = shouldLowPower
+            isCharging = charging,
+            batteryTempCelsius = tempCelsius
         )
     }
 
-    fun setLowPowerModeManually(isLowPower: Boolean) {
-        _currentDevice.value = _currentDevice.value.copy(isLowPowerMode = isLowPower)
-    }
-
-    fun updateSmartBatterySaver(enabled: Boolean, threshold: Int = 40) {
-        val current = _currentDevice.value
-        val shouldLowPower = if (enabled && !current.isCharging) {
-            current.batteryLevel <= threshold
-        } else {
-            false
-        }
-        _currentDevice.value = current.copy(
-            smartBatterySaverEnabled = enabled,
-            lowPowerThreshold = threshold,
-            isLowPowerMode = shouldLowPower
-        )
-    }
-
-    fun setCloudConnected(connected: Boolean) {
-        _isCloudConnected.value = connected
-    }
-
-    fun updateNotificationPrefs(vibration: Boolean, sound: Boolean) {
-        // notification fields removed from CctvDevice
-        launchSyncToCloud()
-    }
-
-    // ── Remote Control via Cloud ───────────────────────────────────────────
+    // ── Remote Control ───────────────────────────────────────────
 
     fun remoteToggleTorch(deviceId: String) {
         val updated = _pairedDevices.value.map { dev ->
@@ -184,7 +146,6 @@ class CctvRepository {
         _pairedDevices.value = updated
         val newState = updated.find { it.id == deviceId }?.isRecording ?: false
         remoteCommandCloud(deviceId, if (newState) "start_recording" else "stop_recording")
-        // Also update stream table for immediate viewer feedback
         CoroutineScope(Dispatchers.IO).launch {
             val user = username ?: return@launch
             supabaseService.updateRemoteControl(user, recordingActive = newState)
@@ -199,72 +160,28 @@ class CctvRepository {
             val bytes = java.security.MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
             val hex = bytes.joinToString("") { "%02X".format(it) }
             "HASH-${hex.take(8)}"
-        } catch (e: Exception) {
-            "HASH-" + (100000..999999).random()
-        }
+        } catch (e: Exception) { "HASH-" + (100000..999999).random() }
     }
 
     fun setUsername(user: String) {
         username = user
         val currentDev = _currentDevice.value
         val hashedCode = generateHashedCode(user, currentDev.id)
-        val updatedDev = currentDev.copy(pairingCode = hashedCode)
-        _currentDevice.value = updatedDev
-
+        _currentDevice.value = currentDev.copy(pairingCode = hashedCode)
         CoroutineScope(Dispatchers.IO).launch {
-            // Clean up previous stale non-hashed or duplicate device entries in database
-            supabaseService.cleanUpStalePairedDevices(user, updatedDev.name, hashedCode)
-
-            // Register this device with its deterministic hashed code
-            supabaseService.createPairedDevice(
-                username = user,
-                pairingCode = hashedCode,
-                deviceName = updatedDev.name,
-                ipAddress = updatedDev.ipAddress
-            )
-
-            // Reset remote stream controls on new session start
-            supabaseService.publishStream(
-                username = user,
-                isLive = true,
-                torchOn = false,
-                lensFacingFront = false,
-                sirenActive = false,
-                nightVision = false,
-                batteryLevel = updatedDev.batteryLevel,
-                recordingActive = false
-            )
-            Log.d("CctvRepository", "Device registered with hashed code ($hashedCode) for user: $user")
-            // Fetch all devices on the same account -> AUTOMATIC PAIRING across any network
+            supabaseService.cleanUpStalePairedDevices(user, currentDev.name, hashedCode)
+            supabaseService.createPairedDevice(user, hashedCode, currentDev.name, currentDev.ipAddress)
+            supabaseService.publishStream(user, true, false, false, false, false, currentDev.batteryLevel, false)
             refreshPairedDevices()
         }
     }
 
     fun pairNewDeviceByCode(code: String): Boolean {
         val cleanCode = code.trim().uppercase()
-        if (cleanCode.isBlank()) return false
         val user = username ?: return false
-
         CoroutineScope(Dispatchers.IO).launch {
-            // First check if device with this code exists in DB
             val existing = supabaseService.getPairedDeviceByCode(cleanCode)
-            if (existing != null) {
-                // Device found – add under user
-                supabaseService.createPairedDevice(
-                    username = user,
-                    pairingCode = cleanCode,
-                    deviceName = existing.name,
-                    ipAddress = existing.ipAddress
-                )
-            } else {
-                // Register new device entry
-                supabaseService.createPairedDevice(
-                    username = user,
-                    pairingCode = cleanCode,
-                    deviceName = "Paired Camera $cleanCode",
-                    ipAddress = ""
-                )
-            }
+            supabaseService.createPairedDevice(user, cleanCode, existing?.name ?: "Paired Camera $cleanCode", existing?.ipAddress ?: "")
             refreshPairedDevices()
         }
         return true
@@ -280,14 +197,8 @@ class CctvRepository {
     suspend fun refreshPairedDevices() {
         val user = username ?: return
         val devices = supabaseService.listDevicesForUser(user)
-        // Deduplicate devices by pairingCode and exclude self
         val selfCode = _currentDevice.value.pairingCode
-        val selfId = _currentDevice.value.id
-        val filtered = devices
-            .filter { it.pairingCode != selfCode && it.id != selfId }
-            .distinctBy { it.pairingCode }
-
-        Log.d("CctvRepository", "Found ${filtered.size} auto-paired devices for user: $user")
+        val filtered = devices.filter { it.pairingCode != selfCode }.distinctBy { it.pairingCode }
         _pairedDevices.value = filtered
         if (_selectedCameraId.value.isBlank() && filtered.isNotEmpty()) {
             _selectedCameraId.value = filtered.first().id
@@ -296,90 +207,54 @@ class CctvRepository {
 
     // ── Motion Events & Heatmap ───────────────────────────────────────────
 
-    private val _dailyMotionPoints = MutableStateFlow<List<MotionPoint>>(emptyList())
-    val dailyMotionPoints: StateFlow<List<MotionPoint>> = _dailyMotionPoints.asStateFlow()
-
     fun logMotionEvent(intensity: Float, snapshot: Bitmap?, xRatio: Float = 0.5f, yRatio: Float = 0.5f) {
         val severity = when {
-            intensity > 0.8f -> MotionSeverity.HIGH
+            intensity > 0.8f -> MotionSeverity.CRITICAL
             intensity > 0.5f -> MotionSeverity.HIGH
             intensity > 0.25f -> MotionSeverity.MEDIUM
             else -> MotionSeverity.LOW
         }
-
         val base64 = snapshot?.let { bitmapToBase64(it) }
         val dev = _currentDevice.value
-
         val event = MotionEvent(
             id = UUID.randomUUID().toString(),
+            deviceId = dev.id,
+            deviceName = dev.name,
             timestamp = System.currentTimeMillis(),
+            description = "Motion detected (${(intensity * 100).toInt()}% activity) near camera lens.",
+            intensity = intensity,
             severity = severity,
             snapshotBase64 = base64,
-            description = "Motion detected (${(intensity * 100).toInt()}% activity) near camera lens.",
-            deviceName = dev.name
+            xRatio = xRatio,
+            yRatio = yRatio
         )
-
         _motionEvents.value = listOf(event) + _motionEvents.value
-        _currentDevice.value = dev.copy(
-            lastMotionTime = event.timestamp
-        )
-
-        val newPoint = MotionPoint(x = xRatio, y = yRatio, intensity = intensity)
-        val cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
-        _dailyMotionPoints.value = (_dailyMotionPoints.value.filter { it.timestamp > cutoff } + newPoint)
-
-        // Upload motion event to Supabase
+        _currentDevice.value = dev.copy(lastMotionTime = event.timestamp, lastMotionIntensity = intensity)
+        val newPoint = MotionPoint(xRatio = xRatio, yRatio = yRatio, intensity = intensity)
+        _dailyMotionPoints.value = (_dailyMotionPoints.value.filter { it.timestamp > System.currentTimeMillis() - 86400000L } + newPoint)
         CoroutineScope(Dispatchers.IO).launch {
-            supabaseService.logMotionAlert(
-                username = username ?: return@launch,
-                deviceId = dev.id,
-                deviceName = dev.name,
-                intensity = intensity,
-                severity = severity.name,
-                description = event.description,
-                snapshotBase64 = base64
-            )
+            supabaseService.logMotionAlert(username ?: return@launch, dev.id, dev.name, intensity, severity.name, event.description, base64)
         }
     }
-
-    // ── Helpers ────────────────────────────────────────────────────────────
 
     private fun bitmapToBase64(bitmap: Bitmap): String {
         val outputStream = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, 60, outputStream)
-        val byteArray = outputStream.toByteArray()
-        return Base64.encodeToString(byteArray, Base64.NO_WRAP)
+        return Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
     }
 
-    private fun launchSyncToCloud() {
-        CoroutineScope(Dispatchers.IO).launch {
-            syncDeviceStateToCloud()
-        }
-    }
+    private fun launchSyncToCloud() { CoroutineScope(Dispatchers.IO).launch { syncDeviceStateToCloud() } }
 
     suspend fun syncDeviceStateToCloud() {
         val dev = _currentDevice.value
         val user = username ?: return
-        supabaseService.publishStream(
-            username = user,
-            isLive = true,
-            torchOn = dev.torchOn,
-            lensFacingFront = dev.lensFacingFront,
-            sirenActive = dev.sirenActive,
-            nightVision = dev.nightVision,
-            batteryLevel = dev.batteryLevel,
-            recordingActive = dev.isRecording
-        )
+        supabaseService.publishStream(user, true, dev.torchOn, dev.lensFacingFront, dev.sirenActive, dev.nightVision, dev.batteryLevel, dev.isRecording)
     }
 
     private fun remoteCommandCloud(deviceId: String, action: String) {
         CoroutineScope(Dispatchers.IO).launch {
             val user = username ?: return@launch
-            supabaseService.insertCommand(
-                username = user,
-                deviceId = deviceId,
-                action = action
-            )
+            supabaseService.insertCommand(user, deviceId, action)
         }
     }
 
@@ -390,9 +265,7 @@ class CctvRepository {
                     ?.flatMap { it.inetAddresses.toList() }
                     ?.firstOrNull { !it.isLoopbackAddress && it is Inet4Address }
                     ?.hostAddress ?: "192.168.1.100"
-            } catch (e: Exception) {
-                "192.168.1.100"
-            }
+            } catch (e: Exception) { "192.168.1.100" }
         }
     }
 }

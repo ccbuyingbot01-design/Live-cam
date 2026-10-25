@@ -13,9 +13,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewModelScope
-import com.example.cctv.ai.AiChatMessage
-import com.example.cctv.ai.AiDetectionFeedItem
-import com.example.cctv.ai.AiThreatAssessment
+import com.example.cctv.data.AiChatMessage
+import com.example.cctv.data.AiDetectionFeedItem
+import com.example.cctv.data.AiThreatAssessment
 import com.example.cctv.data.CctvRepository
 import com.example.cctv.data.DetectedHuman
 import com.example.cctv.data.DeviceMode
