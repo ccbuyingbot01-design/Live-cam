@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -28,8 +27,8 @@ import com.example.ui.theme.SecurityGreen
 
 @Composable
 fun NetworkStatusIndicator(
-    isWifi: Boolean,
-    networkName: String,
+    isWifi: Boolean = true,
+    networkName: String = "Internet",
     modifier: Modifier = Modifier,
     onClick: () -> Unit = {}
 ) {
@@ -39,7 +38,7 @@ fun NetworkStatusIndicator(
             .background(Color.Black.copy(alpha = 0.82f))
             .border(
                 1.dp,
-                if (isWifi) SecurityGreen.copy(alpha = 0.8f) else NeonCyanPrimary.copy(alpha = 0.8f),
+                SecurityGreen.copy(alpha = 0.8f),
                 RoundedCornerShape(12.dp)
             )
             .clickable { onClick() }
@@ -50,18 +49,14 @@ fun NetworkStatusIndicator(
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Icon(
-                imageVector = if (isWifi) Icons.Default.Wifi else Icons.Default.SignalCellularAlt,
-                contentDescription = if (isWifi) "Wi-Fi Connected" else "Cellular Connected",
-                tint = if (isWifi) SecurityGreen else NeonCyanPrimary,
+                imageVector = Icons.Default.Wifi,
+                contentDescription = "LiveKit Network Active",
+                tint = SecurityGreen,
                 modifier = Modifier.size(14.dp)
             )
 
             Text(
-                text = if (isWifi) {
-                    "📶 WI-FI | 720p HD @ 30 FPS (High Bandwidth / Local P2P + LiveKit WebRTC)"
-                } else {
-                    "📡 MOBILE DATA | 480p SD @ 30 FPS (LiveKit Cloud WebRTC Mobile CGNAT Optimized)"
-                },
+                text = "⚡ LIVEKIT CLOUD WebRTC | 2-Way Live Stream (1080p HD Ultra-Low Latency)",
                 color = Color.White,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
@@ -70,3 +65,4 @@ fun NetworkStatusIndicator(
         }
     }
 }
+

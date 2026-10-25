@@ -17,6 +17,17 @@ object LiveKitTokenGenerator {
     const val LIVEKIT_API_KEY: String = "APIoUizemAhL4XR"
     const val LIVEKIT_API_SECRET: String = "OmqL8hsDwstYmL4s4ObjoEs0ox32DsoSx910q24wyCM"
 
+    fun toLiveKitRoomName(slug: String): String {
+        val cleaned = slug.lowercase().replace(Regex("[^a-z0-9-]"), "")
+        return if (cleaned.startsWith("cam-")) cleaned.take(64) else "cam-$cleaned".take(64)
+    }
+
+    fun makeParticipantIdentity(seed: String): String {
+        val suffix = java.util.UUID.randomUUID().toString().take(6)
+        val safe = seed.replace(Regex("[^a-zA-Z0-9_-]"), "")
+        return "cam_${if (safe.isBlank()) "guest" else safe}_$suffix".take(64)
+    }
+
     fun generateAccessToken(
         roomName: String,
         identity: String,

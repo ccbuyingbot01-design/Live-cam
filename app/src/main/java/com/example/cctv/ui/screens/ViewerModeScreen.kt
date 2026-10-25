@@ -102,7 +102,7 @@ import java.util.Locale
 @Composable
 fun ViewerModeScreen(
     viewModel: CctvViewModel,
-    onNavigateToLogs: () -> Unit,
+    onNavigateToLogs: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val pairedDevices by viewModel.pairedDevices.collectAsState()
@@ -310,125 +310,22 @@ fun ViewerModeScreen(
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         val displayBitmap = liveStreamBitmap
-                        var forceCellularJpegFallback by remember { mutableStateOf(false) }
-
-                        val useLiveKitTrack = liveKitVideoTrack != null && !forceCellularJpegFallback
-
-                        if (liveKitVideoTrack != null || displayBitmap != null) {
-                            if (useLiveKitTrack) {
-                                com.example.cctv.ui.components.LiveKitVideoRenderer(
-                                    videoTrack = liveKitVideoTrack,
-                                    room = viewModel.liveKitManager.room,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else if (displayBitmap != null) {
-                                androidx.compose.foundation.Image(
-                                    bitmap = displayBitmap.asImageBitmap(),
-                                    contentDescription = "Live Camera Feed",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            }
-
-                            MotionHeatmapOverlay(
-                                motionPoints = dailyMotionPoints,
-                                modifier = Modifier.fillMaxSize(),
-                                enabled = showHeatmap
+                        // Render video track or image, or show loading if both are missing
+                        if (liveKitVideoTrack != null) {
+                            com.example.cctv.ui.components.LiveKitVideoRenderer(
+                                videoTrack = liveKitVideoTrack,
+                                room = viewModel.liveKitManager.room,
+                                modifier = Modifier.fillMaxSize()
                             )
-
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                for (human in detectedHumans) {
-                                    val left = human.boundingBox.left * size.width
-                                    val top = human.boundingBox.top * size.height
-                                    val right = human.boundingBox.right * size.width
-                                    val bottom = human.boundingBox.bottom * size.height
-                                    val rectWidth = right - left
-                                    val rectHeight = bottom - top
-
-                                    drawRect(
-                                        color = NightVisionGreen,
-                                        topLeft = Offset(left, top),
-                                        size = androidx.compose.ui.geometry.Size(rectWidth, rectHeight),
-                                        style = Stroke(width = 3.dp.toPx())
-                                    )
-
-                                    drawRect(
-                                        color = NightVisionGreen.copy(alpha = 0.15f),
-                                        topLeft = Offset(left, top),
-                                        size = androidx.compose.ui.geometry.Size(rectWidth, rectHeight)
-                                    )
-                                }
-                            }
-
-                            if (activeCamera.nightVision) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(NightVisionGreen.copy(alpha = 0.15f))
-                                )
-                            }
-
-                            Row(
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(
-                                            when {
-                                                liveKitReconnecting -> Color(0xFFFF3D00).copy(alpha = 0.9f)
-                                                forceCellularJpegFallback -> Color(0xFFFF9100).copy(alpha = 0.9f)
-                                                liveKitVideoTrack != null -> Color(0xFF00E5FF).copy(alpha = 0.9f)
-                                                else -> Color(0xFFFF9100).copy(alpha = 0.85f)
-                                            }
-                                        )
-                                        .clickable {
-                                            if (liveKitVideoTrack != null) {
-                                                forceCellularJpegFallback = !forceCellularJpegFallback
-                                            } else {
-                                                viewModel.forceReconnectLiveKit()
-                                            }
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = when {
-                                            liveKitReconnecting -> "🔄 RECONNECTING LIVEKIT (#$liveKitReconnectAttempt)... TAP TO RETRY"
-                                            liveKitVideoTrack != null -> "● LIVEKIT CLOUD WebRTC STREAMING | $liveKitHealthStatus"
-                                            else -> "● LIVEKIT CLOUD CONNECTING... | $liveKitHealthStatus"
-                                        },
-                                        color = Color.Black,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-
-                                com.example.cctv.ui.components.NetworkStatusIndicator(
-                                    isWifi = isWifiNetwork,
-                                    networkName = networkType
-                                )
-                            }
-
-                            IconButton(
-                                onClick = { isFullScreen = true },
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(8.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.Black.copy(alpha = 0.6f))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Fullscreen,
-                                    contentDescription = "Full Screen",
-                                    tint = Color.White
-                                )
-                            }
+                        } else if (displayBitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = displayBitmap.asImageBitmap(),
+                                contentDescription = "Live Camera Feed",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
                         } else {
+                            // Loading state
                             Column(
                                 modifier = Modifier.fillMaxSize().padding(16.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -440,40 +337,51 @@ fun ViewerModeScreen(
                                     modifier = Modifier.size(36.dp)
                                 )
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = "Connecting to Live Camera Stream...",
-                                    color = Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "LiveKit Status: $liveKitHealthStatus",
-                                    color = TextSecondary,
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
-                                androidx.compose.material3.Button(
-                                    onClick = { viewModel.forceReconnectLiveKit() },
-                                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = NeonCyanPrimary.copy(alpha = 0.25f)),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyanPrimary),
-                                    shape = RoundedCornerShape(20.dp)
-                                ) {
-                                    Text("🔄 Retry LiveKit Stream", color = NeonCyanPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
+                                Text("Connecting to Live Camera Stream...", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             }
+                        }
+
+                        // Overlays
+                        MotionHeatmapOverlay(motionPoints = dailyMotionPoints, modifier = Modifier.fillMaxSize(), enabled = showHeatmap)
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            for (human in detectedHumans) {
+                                val left = human.boundingBox.left * size.width
+                                val top = human.boundingBox.top * size.height
+                                val right = human.boundingBox.right * size.width
+                                val bottom = human.boundingBox.bottom * size.height
+                                drawRect(color = NightVisionGreen, topLeft = Offset(left, top), size = androidx.compose.ui.geometry.Size(right - left, bottom - top), style = Stroke(width = 3.dp.toPx()))
+                            }
+                        }
+                        if (activeCamera.nightVision) {
+                            Box(modifier = Modifier.fillMaxSize().background(NightVisionGreen.copy(alpha = 0.15f)))
+                        }
+
+                        // Status Badge Row
+                        Row(modifier = Modifier.align(Alignment.TopStart).padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Box(modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (liveKitReconnecting) Color(0xFFFF3D00).copy(alpha = 0.9f) else if (liveKitVideoTrack != null) Color(0xFF00E5FF).copy(alpha = 0.9f) else Color(0xFFFF9100).copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 4.dp)) {
+                                Text(text = if (liveKitReconnecting) "🔄 RECONNECTING..." else if (liveKitVideoTrack != null) "● LIVEKIT CLOUD WebRTC STREAMING" else "● LIVEKIT CLOUD CONNECTING...", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                            }
+                            com.example.cctv.ui.components.NetworkStatusIndicator(isWifi = isWifiNetwork, networkName = networkType)
+                        }
+
+                        // Fullscreen Button
+                        IconButton(onClick = { isFullScreen = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.6f))) {
+                            Icon(imageVector = Icons.Default.Fullscreen, contentDescription = "Full Screen", tint = Color.White)
                         }
                     }
                 }
 
-                // Remote Controls Grid Panel
+                // Remote Controls Grid Panel with 2-Way LiveKit Audio Intercom
+                val isMicMuted by viewModel.isMicrophoneMuted.collectAsState()
                 RemoteControlPanel(
                     device = activeCamera,
                     onToggleTorch = { viewModel.toggleTorchRemote(activeCamera.id) },
                     onToggleSiren = { viewModel.toggleSirenRemote(activeCamera.id) },
                     onToggleLens = { viewModel.switchCameraRemote(activeCamera.id) },
                     onToggleNightVision = { viewModel.toggleNightVisionRemote(activeCamera.id) },
-                    onToggleRecording = { viewModel.startRecordingRemote(activeCamera.id) }
+                    onToggleRecording = { viewModel.startRecordingRemote(activeCamera.id) },
+                    onToggleIntercom = { viewModel.setMicrophoneEnabled(isMicMuted) },
+                    isIntercomActive = !isMicMuted
                 )
 
                 // LiveKit Connection Debug Logs Card

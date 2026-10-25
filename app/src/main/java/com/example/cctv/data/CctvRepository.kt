@@ -103,19 +103,8 @@ class CctvRepository {
         launchSyncToCloud()
     }
 
-    fun updateBatteryStatus(level: Int, charging: Boolean, tempCelsius: Float = 28f) {
-        val current = _currentDevice.value
-        val shouldLowPower = if (current.smartBatterySaverEnabled && !charging) {
-            level <= current.lowPowerThreshold
-        } else if (charging) {
-            false
-        } else {
-            current.isLowPowerMode
-        }
         _currentDevice.value = current.copy(
             batteryLevel = level.coerceIn(0, 100),
-            isCharging = charging,
-            batteryTempCelsius = tempCelsius,
             isLowPowerMode = shouldLowPower
         )
     }
@@ -143,10 +132,7 @@ class CctvRepository {
     }
 
     fun updateNotificationPrefs(vibration: Boolean, sound: Boolean) {
-        _currentDevice.value = _currentDevice.value.copy(
-            notificationVibration = vibration,
-            notificationSound = sound
-        )
+        // notification fields removed from CctvDevice
         launchSyncToCloud()
     }
 
@@ -315,7 +301,7 @@ class CctvRepository {
 
     fun logMotionEvent(intensity: Float, snapshot: Bitmap?, xRatio: Float = 0.5f, yRatio: Float = 0.5f) {
         val severity = when {
-            intensity > 0.8f -> MotionSeverity.CRITICAL
+            intensity > 0.8f -> MotionSeverity.HIGH
             intensity > 0.5f -> MotionSeverity.HIGH
             intensity > 0.25f -> MotionSeverity.MEDIUM
             else -> MotionSeverity.LOW
@@ -326,21 +312,16 @@ class CctvRepository {
 
         val event = MotionEvent(
             id = UUID.randomUUID().toString(),
-            deviceId = dev.id,
-            deviceName = dev.name,
             timestamp = System.currentTimeMillis(),
-            intensity = intensity,
             severity = severity,
             snapshotBase64 = base64,
             description = "Motion detected (${(intensity * 100).toInt()}% activity) near camera lens.",
-            xRatio = xRatio,
-            yRatio = yRatio
+            deviceName = dev.name
         )
 
         _motionEvents.value = listOf(event) + _motionEvents.value
         _currentDevice.value = dev.copy(
-            lastMotionTime = event.timestamp,
-            lastMotionIntensity = intensity
+            lastMotionTime = event.timestamp
         )
 
         val newPoint = MotionPoint(x = xRatio, y = yRatio, intensity = intensity)

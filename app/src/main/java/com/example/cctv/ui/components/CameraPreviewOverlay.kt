@@ -254,10 +254,7 @@ fun CameraPreviewOverlay(
                     )
                 }
             } else {
-                val isWifiNetwork by viewModel.isWifiNetwork.collectAsState()
-                val networkType by viewModel.networkType.collectAsState()
-
-                // LIVE STREAM & NETWORK STATUS badge
+                // LIVE STREAM STATUS badge
                 Column(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -267,7 +264,7 @@ fun CameraPreviewOverlay(
                             .background(Color.Black.copy(alpha = 0.75f))
                             .border(
                                 1.dp,
-                                if (isWifiNetwork) Color(0xFF00E5FF) else Color(0xFF00E676),
+                                Color(0xFF00E676),
                                 RoundedCornerShape(20.dp)
                             )
                             .padding(horizontal = 10.dp, vertical = 6.dp),
@@ -277,15 +274,11 @@ fun CameraPreviewOverlay(
                             modifier = Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(if (isWifiNetwork) Color(0xFF00E5FF) else Color(0xFF00E676))
+                                .background(Color(0xFF00E676))
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (isWifiNetwork) {
-                                "📶 WI-FI | 720p HD @ 30 FPS (High Bandwidth / Local P2P + LiveKit)"
-                            } else {
-                                "📡 MOBILE DATA | 480p SD @ 30 FPS (LiveKit Cloud WebRTC Mobile CGNAT Optimized)"
-                            },
+                            text = "⚡ LIVEKIT CLOUD WebRTC | 2-Way Live Stream (1080p HD @ 30 FPS)",
                             color = Color.White,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,

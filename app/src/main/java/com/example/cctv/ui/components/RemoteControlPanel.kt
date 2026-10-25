@@ -19,6 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
@@ -51,6 +53,8 @@ fun RemoteControlPanel(
     onToggleLens: () -> Unit,
     onToggleNightVision: () -> Unit,
     onToggleRecording: () -> Unit,
+    onToggleIntercom: (() -> Unit)? = null,
+    isIntercomActive: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -120,15 +124,35 @@ fun RemoteControlPanel(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Row 2: Record button (full-width accent button)
-        ControlButton(
-            icon = if (device.isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
-            label = if (device.isRecording) "Stop Recording" else "Start Record",
-            isActive = device.isRecording,
-            activeColor = LoveAlertRed,
-            onClick = onToggleRecording,
-            testTag = "remote_record_btn"
-        )
+        // Row 2: 2-Way Intercom & Record buttons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            onToggleIntercom?.let {
+                Box(modifier = Modifier.weight(1f)) {
+                    ControlButton(
+                        icon = if (isIntercomActive) Icons.Default.Mic else Icons.Default.MicOff,
+                        label = if (isIntercomActive) "Intercom ON" else "Talk Back",
+                        isActive = isIntercomActive,
+                        activeColor = NeonCyanPrimary,
+                        onClick = it,
+                        testTag = "remote_intercom_btn"
+                    )
+                }
+            }
+
+            Box(modifier = Modifier.weight(1f)) {
+                ControlButton(
+                    icon = if (device.isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
+                    label = if (device.isRecording) "Stop Rec" else "Start Rec",
+                    isActive = device.isRecording,
+                    activeColor = LoveAlertRed,
+                    onClick = onToggleRecording,
+                    testTag = "remote_record_btn"
+                )
+            }
+        }
     }
 }
 

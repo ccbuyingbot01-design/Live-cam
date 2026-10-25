@@ -60,8 +60,7 @@ import com.example.cctv.data.DeviceMode
 import com.example.cctv.supabase.SupabaseUser
 import com.example.cctv.ui.screens.AuthScreen
 import com.example.cctv.ui.screens.CameraModeScreen
-import com.example.cctv.ui.screens.MotionLogsScreen
-import com.example.cctv.ui.screens.PermissionsGuideScreen
+// Removed MotionLogsScreen and PermissionsGuideScreen imports
 import com.example.cctv.ui.screens.RoleChoiceScreen
 import com.example.cctv.ui.screens.ViewerModeScreen
 import com.example.cctv.viewmodel.CctvViewModel
@@ -72,15 +71,13 @@ import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.NeonCyanPrimary
 import com.example.ui.theme.TextSecondary
 
-import com.example.cctv.ui.components.DebugConsoleOverlay
-import com.example.cctv.util.DebugLogger
+// Removed DebugConsoleOverlay import
+// DebugLogger removed
 
 enum class AppDestination {
     AUTH,
     ROLE_CHOICE,
-    SURVEILLANCE_MAIN,
-    MOTION_LOGS,
-    PERMISSIONS_GUIDE
+    SURVEILLANCE_MAIN
 }
 
 class MainActivity : ComponentActivity() {
@@ -92,28 +89,13 @@ class MainActivity : ComponentActivity() {
     ) { permissions ->
         val cameraGranted = permissions[Manifest.permission.CAMERA] ?: false
         if (cameraGranted) {
-            try {
-                viewModel.startForegroundCctvService(this)
-            } catch (e: Throwable) {
-                DebugLogger.w("MainActivity", "Failed to start foreground service on launcher result", e)
-            }
+            // Service start removed
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        try {
-            enableEdgeToEdge()
-        } catch (e: Throwable) {
-            DebugLogger.w("MainActivity", "enableEdgeToEdge fallback", e)
-        }
-
-        // Initialize global DebugLogger to capture all errors & uncaught crashes
-        try {
-            DebugLogger.init(applicationContext)
-            DebugLogger.i("MainActivity", "App started. Debug console active on all screens.")
-        } catch (_: Throwable) {}
-
+        // Initialize global logger removed
         requestInitialPermissions()
 
         setContent {
@@ -124,8 +106,7 @@ class MainActivity : ComponentActivity() {
                         onRequestPermissions = { requestInitialPermissions() }
                     )
 
-                    // Always-on Debug Mode overlay box on top of EVERY page
-                    DebugConsoleOverlay()
+                    // Always-on Debug Mode overlay box removed
                 }
             }
         }
@@ -165,17 +146,10 @@ fun LoveCctvApp(
     var currentDestination by remember { mutableStateOf(AppDestination.AUTH) }
     val supabaseUser by viewModel.supabaseUser.collectAsState()
     val deviceMode by viewModel.deviceMode.collectAsState()
-    val motionEvents by viewModel.motionEvents.collectAsState()
 
     androidx.compose.runtime.LaunchedEffect(supabaseUser) {
         if (supabaseUser != null && currentDestination == AppDestination.AUTH) {
-            val rememberedMode = viewModel.getRememberedMode()
-            if (rememberedMode != null) {
-                viewModel.setDeviceMode(rememberedMode)
-                currentDestination = AppDestination.SURVEILLANCE_MAIN
-            } else {
-                currentDestination = AppDestination.ROLE_CHOICE
-            }
+            currentDestination = AppDestination.ROLE_CHOICE
         }
     }
 
@@ -237,39 +211,6 @@ fun LoveCctvApp(
                         )
                     }
 
-                    // Motion Log Icon Badge
-                    IconButton(
-                        onClick = { currentDestination = AppDestination.MOTION_LOGS },
-                        modifier = Modifier.testTag("appbar_motion_logs_btn")
-                    ) {
-                        BadgedBox(
-                            badge = {
-                                if (motionEvents.isNotEmpty()) {
-                                    Badge(containerColor = LoveAlertRed) {
-                                        Text("${motionEvents.size}", color = Color.White)
-                                    }
-                                }
-                            }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = "Logs",
-                                tint = Color.White
-                            )
-                        }
-                    }
-
-                    // System Settings / Permissions Guide
-                    IconButton(
-                        onClick = { currentDestination = AppDestination.PERMISSIONS_GUIDE },
-                        modifier = Modifier.testTag("appbar_settings_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "Settings",
-                            tint = TextSecondary
-                        )
-                    }
                 }
             }
         },
@@ -346,22 +287,9 @@ fun LoveCctvApp(
                         CameraModeScreen(viewModel = viewModel)
                     } else {
                         ViewerModeScreen(
-                            viewModel = viewModel,
-                            onNavigateToLogs = { currentDestination = AppDestination.MOTION_LOGS }
+                            viewModel = viewModel
                         )
                     }
-                }
-                AppDestination.MOTION_LOGS -> {
-                    MotionLogsScreen(
-                        viewModel = viewModel,
-                        onBack = { currentDestination = AppDestination.SURVEILLANCE_MAIN }
-                    )
-                }
-                AppDestination.PERMISSIONS_GUIDE -> {
-                    PermissionsGuideScreen(
-                        onBack = { currentDestination = AppDestination.SURVEILLANCE_MAIN },
-                        onRequestCameraPermissions = onRequestPermissions
-                    )
                 }
             }
         }

@@ -1,5 +1,6 @@
 package com.example.cctv.data
 
+import android.graphics.RectF
 import androidx.annotation.Keep
 
 enum class DeviceMode {
@@ -21,47 +22,56 @@ data class CctvDevice(
     val pairingCode: String,
     val isOnline: Boolean = true,
     val isStreaming: Boolean = true,
-    val torchOn: Boolean = false,
     val lensFacingFront: Boolean = false,
-    val motionGuardEnabled: Boolean = true,
-    val motionSensitivity: Float = 0.4f,
-    val lastMotionTime: Long = System.currentTimeMillis(),
-    val lastMotionIntensity: Float = 0f,
-    val batteryLevel: Int = 85,
-    val isCharging: Boolean = true,
-    val stealthMode: Boolean = false,
+    val ipAddress: String = "",
+    val batteryLevel: Int = 100,
+    val isCharging: Boolean = false,
+    val batteryTempCelsius: Float = 28f,
+    val torchOn: Boolean = false,
     val sirenActive: Boolean = false,
     val nightVision: Boolean = false,
-    val ipAddress: String = "192.168.1.105",
-    val fps: Int = 30,
-    // Remote-controllable recording state (set by viewer, obeyed by camera)
     val isRecording: Boolean = false,
-    val notificationVibration: Boolean = true,
-    val notificationSound: Boolean = true,
-    val isLowPowerMode: Boolean = false,
+    val motionSensitivity: Float = 0.5f,
+    val motionGuardEnabled: Boolean = false,
+    val lastMotionTime: Long = 0L,
+    val lastMotionIntensity: Float = 0f,
+    val stealthMode: Boolean = false,
     val smartBatterySaverEnabled: Boolean = true,
-    val lowPowerThreshold: Int = 40,
-    val batteryTempCelsius: Float = 28f
+    val lowPowerThreshold: Int = 20,
+    val isLowPowerMode: Boolean = false,
+    val fps: Int = 30,
+    val notificationVibration: Boolean = true,
+    val notificationSound: Boolean = true
+)
+
+@Keep
+data class DetectedHuman(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val boundingBox: RectF,
+    val confidence: Float = 0.9f
 )
 
 @Keep
 data class MotionPoint(
-    val x: Float, // Normalized 0.0f..1.0f
-    val y: Float, // Normalized 0.0f..1.0f
-    val intensity: Float,
+    val xRatio: Float = 0.5f,
+    val yRatio: Float = 0.5f,
+    val x: Float = 0.5f,
+    val y: Float = 0.5f,
+    val intensity: Float = 0.5f,
     val timestamp: Long = System.currentTimeMillis()
 )
 
 @Keep
 data class MotionEvent(
-    val id: String,
-    val deviceId: String,
-    val deviceName: String,
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val deviceId: String = "CAM-1",
+    val deviceName: String = "Love Cam #1",
     val timestamp: Long = System.currentTimeMillis(),
-    val intensity: Float,
-    val severity: MotionSeverity,
+    val description: String = "Motion Detected",
+    val intensity: Float = 0.5f,
+    val severity: MotionSeverity = MotionSeverity.MEDIUM,
     val snapshotBase64: String? = null,
-    val description: String,
+    val imageUrl: String? = null,
     val xRatio: Float = 0.5f,
     val yRatio: Float = 0.5f
 )

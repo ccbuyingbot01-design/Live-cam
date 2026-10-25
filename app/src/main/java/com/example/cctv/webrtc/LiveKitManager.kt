@@ -111,9 +111,26 @@ class LiveKitManager(private val context: Context) {
         }
     }
 
+    private val _isMicrophoneMuted = MutableStateFlow(false)
+    val isMicrophoneMuted: StateFlow<Boolean> = _isMicrophoneMuted.asStateFlow()
+
+    fun setMicrophoneEnabled(enabled: Boolean) {
+        val currentRoom = room ?: return
+        val scope = externalScope ?: CoroutineScope(Dispatchers.IO)
+        scope.launch(Dispatchers.IO) {
+            try {
+                currentRoom.localParticipant.setMicrophoneEnabled(enabled)
+                _isMicrophoneMuted.value = !enabled
+                logConnectionStep("LiveKit 2-Way Audio Microphone set to: ${if (enabled) "ON (Publishing 2-Way Voice)" else "MUTED"}")
+            } catch (e: Throwable) {
+                Log.e(TAG, "Error toggling microphone: ${e.message}", e)
+            }
+        }
+    }
+
     /**
-     * Feeds real-time camera bitmaps directly into LiveKit's WebRTC hardware encoder pipeline.
-     * Capped at ~30 FPS (33ms) for silk-smooth ultra-low latency (<200ms) live streaming.
+     * Feeds real-time camera bitmaps directly into LiveKit's WebRTC hardware/software encoder pipeline.
+     * Streams smooth ultra-low latency (<200ms) HD video over any internet connection (Wi-Fi or Mobile Data).
      */
     fun pushBitmapFrame(bitmap: Bitmap, rotation: Int = 0) {
         val capturer = bitmapCapturer ?: return
@@ -122,20 +139,20 @@ class LiveKitManager(private val context: Context) {
         lastFramePushTime = now
 
         try {
-            val maxDim = 640
+            val maxDim = 1080 // Full 1080p HD support
             val w = bitmap.width
             val h = bitmap.height
             val frameToPush = if (w > maxDim || h > maxDim) {
                 val ratio = minOf(maxDim.toFloat() / w, maxDim.toFloat() / h)
                 val newW = (w * ratio).toInt().coerceAtLeast(1)
                 val newH = (h * ratio).toInt().coerceAtLeast(1)
-                Bitmap.createScaledBitmap(bitmap, newW, newH, false)
+                Bitmap.createScaledBitmap(bitmap, newW, newH, true)
             } else {
                 bitmap
             }
 
-            // Software readable bitmap required by WebRTC C++ encoder
-            val safeBitmap = if (frameToPush.config == Bitmap.Config.HARDWARE) {
+            // Always guarantee software readable ARGB_8888 for WebRTC C++ encoder
+            val safeBitmap = if (frameToPush.config != Bitmap.Config.ARGB_8888) {
                 frameToPush.copy(Bitmap.Config.ARGB_8888, false)
             } else {
                 frameToPush
@@ -145,7 +162,7 @@ class LiveKitManager(private val context: Context) {
                 capturer.pushBitmap(safeBitmap, rotation)
             }
         } catch (e: Exception) {
-            Log.w(TAG, "pushBitmapFrame error on cellular stream", e)
+            Log.w(TAG, "pushBitmapFrame error on LiveKit stream", e)
         }
     }
 
